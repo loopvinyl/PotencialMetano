@@ -8,6 +8,7 @@ from matplotlib.ticker import FuncFormatter
 import requests
 from bs4 import BeautifulSoup
 import warnings
+from scipy.signal import fftconvolve
 
 # Configurações iniciais
 st.set_page_config(
@@ -223,6 +224,132 @@ def calcular_emissoes_compostagem(residuos_kg, umidade, dias=50):
     return emissoes_CH4, ch4_total_por_lote
 
 # =============================================================================
+# NOVAS FUNÇÕES PARA SIMULAÇÃO CONTÍNUA (1 LOTE POR DIA POR 20 ANOS)
+# =============================================================================
+
+def calcular_emissoes_aterro_continuo(residuos_kg_dia, umidade, temperatura, anos=20):
+    """
+    Calcula emissões de metano do aterro com entrada contínua de 1 lote por dia
+    Baseado no script v2n_noAr - simulação de 20 anos
+    """
+    dias = anos * 365
+    
+    # Parâmetros fixos (IPCC 2006)
+    DOC = 0.15  # Carbono orgânico degradável (fração)
+    MCF = 1.0   # Fator de correção de metano (para aterros sanitários)
+    F = 0.5     # Fração de metano no biogás
+    OX = 0.1    # Fator de oxidação
+    Ri = 0.0    # Metano recuperado
+    
+    # DOCf calculado pela temperatura (DOCf = 0.0147 × T + 0.28)
+    DOCf = 0.0147 * temperatura + 0.28
+    
+    # Cálculo do potencial de metano por kg de resíduo
+    potencial_CH4_por_kg = DOC * DOCf * MCF * F * (16/12) * (1 - Ri) * (1 - OX)
+    
+    # Potencial diário
+    potencial_CH4_diario = residuos_kg_dia * potencial_CH4_por_kg
+    
+    # Constante de decaimento anual
+    k_ano = 0.06
+    
+    # Kernel de decaimento (primeira ordem)
+    t = np.arange(1, dias + 1, dtype=float)
+    kernel_ch4 = np.exp(-k_ano * (t - 1) / 365.0) - np.exp(-k_ano * t / 365.0)
+    
+    # Convolução: entrada diária constante com o kernel
+    entradas_diarias = np.ones(dias, dtype=float)
+    emissoes_CH4 = fftconvolve(entradas_diarias, kernel_ch4, mode='full')[:dias]
+    emissoes_CH4 *= potencial_CH4_diario
+    
+    # Potencial total acumulado em 20 anos
+    potencial_CH4_total = np.sum(emissoes_CH4)
+    
+    return emissoes_CH4, potencial_CH4_total, DOCf
+
+def calcular_emissoes_vermicompostagem_continuo(residuos_kg_dia, umidade, anos=20):
+    """
+    Calcula emissões de metano na vermicompostagem com entrada contínua
+    """
+    dias = anos * 365
+    
+    # Parâmetros fixos para vermicompostagem
+    TOC = 0.436  # Fração de carbono orgânico total
+    CH4_C_FRAC = 0.13 / 100  # Fração do TOC emitida como CH4-C (0.13%)
+    fracao_ms = 1 - umidade  # Fração de matéria seca
+    
+    # Metano total por lote diário
+    ch4_total_por_lote = residuos_kg_dia * (TOC * CH4_C_FRAC * (16/12) * fracao_ms)
+    
+    # Perfil temporal (50 dias)
+    perfil_ch4 = np.array([
+        0.02, 0.02, 0.02, 0.03, 0.03,  # Dias 1-5
+        0.04, 0.04, 0.05, 0.05, 0.06,  # Dias 6-10
+        0.07, 0.08, 0.09, 0.10, 0.09,  # Dias 11-15
+        0.08, 0.07, 0.06, 0.05, 0.04,  # Dias 16-20
+        0.03, 0.02, 0.02, 0.01, 0.01,  # Dias 21-25
+        0.01, 0.01, 0.01, 0.01, 0.01,  # Dias 26-30
+        0.005, 0.005, 0.005, 0.005, 0.005,  # Dias 31-35
+        0.005, 0.005, 0.005, 0.005, 0.005,  # Dias 36-40
+        0.002, 0.002, 0.002, 0.002, 0.002,  # Dias 41-45
+        0.001, 0.001, 0.001, 0.001, 0.001   # Dias 46-50
+    ])
+    
+    # Normalizar perfil
+    perfil_ch4 = perfil_ch4 / perfil_ch4.sum()
+    
+    # Convolução: entrada diária constante com o perfil de 50 dias
+    entradas_diarias = np.ones(dias, dtype=float)
+    emissoes_CH4 = fftconvolve(entradas_diarias, perfil_ch4, mode='full')[:dias]
+    emissoes_CH4 *= ch4_total_por_lote
+    
+    # Potencial total acumulado em 20 anos
+    potencial_CH4_total = np.sum(emissoes_CH4)
+    
+    return emissoes_CH4, potencial_CH4_total
+
+def calcular_emissoes_compostagem_continuo(residuos_kg_dia, umidade, anos=20):
+    """
+    Calcula emissões de metano na compostagem termofílica com entrada contínua
+    """
+    dias = anos * 365
+    
+    # Parâmetros fixos para compostagem termofílica
+    TOC = 0.436  # Fração de carbono orgânico total
+    CH4_C_FRAC = 0.006  # Fração do TOC emitida como CH4-C (0.6%)
+    fracao_ms = 1 - umidade  # Fração de matéria seca
+    
+    # Metano total por lote diário
+    ch4_total_por_lote = residuos_kg_dia * (TOC * CH4_C_FRAC * (16/12) * fracao_ms)
+    
+    # Perfil temporal para compostagem termofílica (50 dias)
+    perfil_ch4 = np.array([
+        0.01, 0.02, 0.03, 0.05, 0.08,  # Dias 1-5
+        0.12, 0.15, 0.18, 0.20, 0.18,  # Dias 6-10 (pico termofílico)
+        0.15, 0.12, 0.10, 0.08, 0.06,  # Dias 11-15
+        0.05, 0.04, 0.03, 0.02, 0.02,  # Dias 16-20
+        0.01, 0.01, 0.01, 0.01, 0.01,  # Dias 21-25
+        0.005, 0.005, 0.005, 0.005, 0.005,  # Dias 26-30
+        0.002, 0.002, 0.002, 0.002, 0.002,  # Dias 31-35
+        0.001, 0.001, 0.001, 0.001, 0.001,  # Dias 36-40
+        0.001, 0.001, 0.001, 0.001, 0.001,  # Dias 41-45
+        0.001, 0.001, 0.001, 0.001, 0.001   # Dias 46-50
+    ])
+    
+    # Normalizar perfil
+    perfil_ch4 = perfil_ch4 / perfil_ch4.sum()
+    
+    # Convolução: entrada diária constante com o perfil de 50 dias
+    entradas_diarias = np.ones(dias, dtype=float)
+    emissoes_CH4 = fftconvolve(entradas_diarias, perfil_ch4, mode='full')[:dias]
+    emissoes_CH4 *= ch4_total_por_lote
+    
+    # Potencial total acumulado em 20 anos
+    potencial_CH4_total = np.sum(emissoes_CH4)
+    
+    return emissoes_CH4, potencial_CH4_total
+
+# =============================================================================
 # FUNÇÃO PARA SIMULAR OS TRÊS CENÁRIOS ECONÔMICOS
 # =============================================================================
 
@@ -283,6 +410,8 @@ def inicializar_session_state():
         st.session_state.moeda_real = "R$"
     if 'run_simulation' not in st.session_state:
         st.session_state.run_simulation = False
+    if 'run_continuous_simulation' not in st.session_state:
+        st.session_state.run_continuous_simulation = False
 
 # =============================================================================
 # FUNÇÃO PARA EXIBIR COTAÇÃO DO CARBONO NO PAINEL LATERAL
@@ -386,47 +515,94 @@ exibir_cotacao_carbono()
 with st.sidebar:
     st.header("⚙️ Parâmetros de Entrada - Brasil")
     
-    # Entrada principal de resíduos (fixo em 100 kg para o lote)
-    st.subheader("📦 Lote de Resíduos")
-    residuos_kg = st.number_input(
-        "Peso do lote (kg)", 
-        min_value=10, 
-        max_value=1000, 
-        value=100, 
-        step=10,
-        help="Peso do lote de resíduos orgânicos para análise"
+    # Seletor de tipo de simulação
+    tipo_simulacao = st.radio(
+        "Tipo de Simulação",
+        ["Lote Único", "Entrada Contínua (1 lote/dia por 20 anos)"],
+        help="Escolha entre analisar um lote único ou simular entrada contínua"
     )
     
-    st.subheader("📊 Parâmetros Ambientais")
-    
-    umidade_valor = st.slider(
-        "Umidade do resíduo (%)", 
-        50, 95, 85, 1,
-        help="Percentual de umidade dos resíduos orgânicos"
-    )
-    umidade = umidade_valor / 100.0
-    
-    temperatura = st.slider(
-        "Temperatura média (°C)", 
-        15, 35, 25, 1,
-        help="Temperatura média ambiente (importante para cálculo do DOCf)"
-    )
-    
-    st.subheader("⏰ Período de Análise")
-    dias_simulacao = st.slider(
-        "Dias de simulação", 
-        50, 1000, 365, 50,
-        help="Período total da simulação em dias"
-    )
-    
-    if st.button("🚀 Calcular Potencial de Metano", type="primary"):
-        st.session_state.run_simulation = True
+    if tipo_simulacao == "Lote Único":
+        # Entrada principal de resíduos (fixo em 100 kg para o lote)
+        st.subheader("📦 Lote de Resíduos")
+        residuos_kg = st.number_input(
+            "Peso do lote (kg)", 
+            min_value=10, 
+            max_value=1000, 
+            value=100, 
+            step=10,
+            help="Peso do lote de resíduos orgânicos para análise"
+        )
+        
+        st.subheader("📊 Parâmetros Ambientais")
+        
+        umidade_valor = st.slider(
+            "Umidade do resíduo (%)", 
+            50, 95, 85, 1,
+            help="Percentual de umidade dos resíduos orgânicos"
+        )
+        umidade = umidade_valor / 100.0
+        
+        temperatura = st.slider(
+            "Temperatura média (°C)", 
+            15, 35, 25, 1,
+            help="Temperatura média ambiente (importante para cálculo do DOCf)"
+        )
+        
+        st.subheader("⏰ Período de Análise")
+        dias_simulacao = st.slider(
+            "Dias de simulação", 
+            50, 1000, 365, 50,
+            help="Período total da simulação em dias"
+        )
+        
+        if st.button("🚀 Calcular Potencial de Metano (Lote Único)", type="primary"):
+            st.session_state.run_simulation = True
+            st.session_state.run_continuous_simulation = False
+            
+    else:  # Entrada Contínua
+        st.subheader("📦 Sistema de Entrada Contínua")
+        
+        residuos_kg_dia = st.number_input(
+            "Peso do lote diário (kg/dia)", 
+            min_value=10, 
+            max_value=1000, 
+            value=100, 
+            step=10,
+            help="Peso de cada lote diário de resíduos orgânicos"
+        )
+        
+        st.subheader("📊 Parâmetros Ambientais")
+        
+        umidade_valor = st.slider(
+            "Umidade do resíduo (%)", 
+            50, 95, 85, 1,
+            help="Percentual de umidade dos resíduos orgânicos"
+        )
+        umidade = umidade_valor / 100.0
+        
+        temperatura = st.slider(
+            "Temperatura média (°C)", 
+            15, 35, 25, 1,
+            help="Temperatura média ambiente (importante para cálculo do DOCf)"
+        )
+        
+        st.subheader("⏰ Período de Análise")
+        anos_simulacao = st.slider(
+            "Anos de simulação", 
+            5, 50, 20, 5,
+            help="Período total da simulação em anos"
+        )
+        
+        if st.button("🚀 Simular Entrada Contínua (20 anos)", type="primary"):
+            st.session_state.run_continuous_simulation = True
+            st.session_state.run_simulation = False
 
 # =============================================================================
-# EXECUÇÃO DA SIMULAÇÃO
+# EXECUÇÃO DA SIMULAÇÃO PARA LOTE ÚNICO (ORIGINAL)
 # =============================================================================
 
-if st.session_state.get('run_simulation', False):
+if st.session_state.get('run_simulation', False) and tipo_simulacao == "Lote Único":
     with st.spinner('Calculando potencial de metano para os três cenários...'):
         
         # =====================================================================
@@ -820,8 +996,403 @@ if st.session_state.get('run_simulation', False):
             - **Sem Créditos:** Necessidade de subsídios ou outras fontes de receita
             """)
 
+# =============================================================================
+# EXECUÇÃO DA SIMULAÇÃO PARA ENTRADA CONTÍNUA (NOVA FUNCIONALIDADE)
+# =============================================================================
+
+elif st.session_state.get('run_continuous_simulation', False) and tipo_simulacao == "Entrada Contínua (1 lote/dia por 20 anos)":
+    with st.spinner('Calculando potencial de metano para entrada contínua de 1 lote por dia durante 20 anos...'):
+        
+        # =====================================================================
+        # 1. CÁLCULO DO POTENCIAL DE METANO PARA ENTRADA CONTÍNUA
+        # =====================================================================
+        
+        # Aterro Sanitário - entrada contínua
+        emissoes_aterro_cont, total_aterro_cont, DOCf = calcular_emissoes_aterro_continuo(
+            residuos_kg_dia, umidade, temperatura, anos_simulacao
+        )
+        
+        # Vermicompostagem - entrada contínua
+        emissoes_vermi_cont, total_vermi_cont = calcular_emissoes_vermicompostagem_continuo(
+            residuos_kg_dia, umidade, anos_simulacao
+        )
+        
+        # Compostagem Termofílica - entrada contínua
+        emissoes_compost_cont, total_compost_cont = calcular_emissoes_compostagem_continuo(
+            residuos_kg_dia, umidade, anos_simulacao
+        )
+        
+        # =====================================================================
+        # 2. CRIAR DATAFRAME COM OS RESULTADOS
+        # =====================================================================
+        
+        dias_total = anos_simulacao * 365
+        datas = pd.date_range(start=datetime.now(), periods=dias_total, freq='D')
+        
+        df_cont = pd.DataFrame({
+            'Data': datas,
+            'Aterro_CH4_kg_dia': emissoes_aterro_cont,
+            'Vermicompostagem_CH4_kg_dia': emissoes_vermi_cont,
+            'Compostagem_CH4_kg_dia': emissoes_compost_cont
+        })
+        
+        # Calcular valores acumulados
+        df_cont['Aterro_Acumulado'] = df_cont['Aterro_CH4_kg_dia'].cumsum()
+        df_cont['Vermi_Acumulado'] = df_cont['Vermicompostagem_CH4_kg_dia'].cumsum()
+        df_cont['Compost_Acumulado'] = df_cont['Compostagem_CH4_kg_dia'].cumsum()
+        
+        # Calcular reduções (evitadas) em relação ao aterro
+        df_cont['Reducao_Vermi'] = df_cont['Aterro_Acumulado'] - df_cont['Vermi_Acumulado']
+        df_cont['Reducao_Compost'] = df_cont['Aterro_Acumulado'] - df_cont['Compost_Acumulado']
+        
+        # Agrupar por ano para análise anual
+        df_cont['Ano'] = df_cont['Data'].dt.year
+        df_anual = df_cont.groupby('Ano').agg({
+            'Aterro_CH4_kg_dia': 'sum',
+            'Vermicompostagem_CH4_kg_dia': 'sum',
+            'Compostagem_CH4_kg_dia': 'sum',
+            'Reducao_Vermi': 'last',
+            'Reducao_Compost': 'last'
+        }).reset_index()
+        
+        # =====================================================================
+        # 3. EXIBIR RESULTADOS PRINCIPAIS - ENTRADA CONTÍNUA
+        # =====================================================================
+        
+        st.header(f"📊 Resultados - Entrada Contínua ({anos_simulacao} anos)")
+        
+        # Métricas principais
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric(
+                "Aterro Sanitário",
+                f"{formatar_br(total_aterro_cont)} kg CH₄",
+                help=f"Total acumulado em {anos_simulacao} anos"
+            )
+        
+        with col2:
+            reducao_vermi_kg = total_aterro_cont - total_vermi_cont
+            reducao_vermi_perc = (1 - total_vermi_cont/total_aterro_cont)*100 if total_aterro_cont > 0 else 0
+            st.metric(
+                "Vermicompostagem",
+                f"{formatar_br(total_vermi_cont)} kg CH₄",
+                delta=f"-{formatar_br(reducao_vermi_perc)}%",
+                delta_color="inverse",
+                help=f"Redução de {formatar_br(reducao_vermi_kg)} kg vs aterro"
+            )
+        
+        with col3:
+            reducao_compost_kg = total_aterro_cont - total_compost_cont
+            reducao_compost_perc = (1 - total_compost_cont/total_aterro_cont)*100 if total_aterro_cont > 0 else 0
+            st.metric(
+                "Compostagem Termofílica",
+                f"{formatar_br(total_compost_cont)} kg CH₄",
+                delta=f"-{formatar_br(reducao_compost_perc)}%",
+                delta_color="inverse",
+                help=f"Redução de {formatar_br(reducao_compost_kg)} kg vs aterro"
+            )
+        
+        # Métricas anuais
+        st.subheader("📈 Métricas Anuais Médias")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            media_anual_aterro = total_aterro_cont / anos_simulacao
+            st.metric(
+                "Aterro (média anual)",
+                f"{formatar_br(media_anual_aterro)} kg CH₄/ano",
+                help="Produção média anual de metano no aterro"
+            )
+        
+        with col2:
+            media_anual_vermi = total_vermi_cont / anos_simulacao
+            st.metric(
+                "Vermicompostagem (média anual)",
+                f"{formatar_br(media_anual_vermi)} kg CH₄/ano",
+                help="Produção média anual de metano na vermicompostagem"
+            )
+        
+        with col3:
+            media_anual_compost = total_compost_cont / anos_simulacao
+            st.metric(
+                "Compostagem (média anual)",
+                f"{formatar_br(media_anual_compost)} kg CH₄/ano",
+                help="Produção média anual de metano na compostagem"
+            )
+        
+        # =====================================================================
+        # 4. GRÁFICO: REDUÇÃO DE EMISSÕES ACUMULADA (20 ANOS) - NOVA FUNCIONALIDADE
+        # =====================================================================
+        
+        st.subheader(f"📉 Redução de Emissões Acumulada ({anos_simulacao} anos) - 1 Lote/dia")
+        
+        fig, ax = plt.subplots(figsize=(14, 7))
+        
+        # Configurar formatação
+        br_formatter = FuncFormatter(br_format)
+        
+        # Plotar linhas de acumulado
+        ax.plot(df_cont['Data'], df_cont['Aterro_Acumulado'], 'r-', 
+                label='Aterro Sanitário', linewidth=3, alpha=0.7)
+        ax.plot(df_cont['Data'], df_cont['Vermi_Acumulado'], 'g-', 
+                label='Vermicompostagem', linewidth=2)
+        ax.plot(df_cont['Data'], df_cont['Compost_Acumulado'], 'b-', 
+                label='Compostagem Termofílica', linewidth=2)
+        
+        # Área de redução (evitadas)
+        ax.fill_between(df_cont['Data'], df_cont['Vermi_Acumulado'], df_cont['Aterro_Acumulado'],
+                        color='green', alpha=0.3, label='Redução Vermicompostagem')
+        ax.fill_between(df_cont['Data'], df_cont['Compost_Acumulado'], df_cont['Aterro_Acumulado'],
+                        color='blue', alpha=0.2, label='Redução Compostagem')
+        
+        # Configurar gráfico
+        ax.set_title(f'Acumulado de Metano em {anos_simulacao} Anos - Entrada de {residuos_kg_dia} kg/dia', 
+                    fontsize=16, fontweight='bold')
+        ax.set_xlabel('Ano')
+        ax.set_ylabel('Metano Acumulado (kg CH₄)')
+        ax.legend(title='Cenário de Gestão', loc='upper left')
+        ax.grid(True, linestyle='--', alpha=0.5)
+        ax.yaxis.set_major_formatter(br_formatter)
+        
+        # Ajustar ticks do eixo x para mostrar anos
+        anos = df_cont['Data'].dt.year.unique()
+        ax.set_xticks([df_cont['Data'].iloc[0] + pd.DateOffset(years=i) for i in range(0, anos_simulacao + 1, max(1, anos_simulacao//10))])
+        ax.set_xticklabels([f'Ano {i}' for i in range(0, anos_simulacao + 1, max(1, anos_simulacao//10))])
+        
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        
+        st.pyplot(fig)
+        
+        # =====================================================================
+        # 5. GRÁFICO: EMISSÕES DIÁRIAS (PRIMEIROS 2 ANOS)
+        # =====================================================================
+        
+        st.subheader("📊 Emissões Diárias de Metano (Primeiros 2 Anos)")
+        
+        fig, ax = plt.subplots(figsize=(14, 7))
+        
+        # Plotar apenas primeiros 2 anos (730 dias) para melhor visualização
+        dias_exibir = min(730, dias_total)
+        
+        # Criar gráfico com linhas para visualizar tendências
+        ax.plot(df_cont['Data'][:dias_exibir], df_cont['Aterro_CH4_kg_dia'][:dias_exibir], 
+                'r-', label='Aterro', linewidth=1.5, alpha=0.7)
+        ax.plot(df_cont['Data'][:dias_exibir], df_cont['Vermicompostagem_CH4_kg_dia'][:dias_exibir], 
+                'g-', label='Vermicompostagem', linewidth=1.5, alpha=0.7)
+        ax.plot(df_cont['Data'][:dias_exibir], df_cont['Compostagem_CH4_kg_dia'][:dias_exibir], 
+                'b-', label='Compostagem', linewidth=1.5, alpha=0.7)
+        
+        ax.set_xlabel('Data')
+        ax.set_ylabel('Metano (kg CH₄/dia)')
+        ax.set_title(f'Emissões Diárias de Metano - Primeiros {dias_exibir//365} Anos', 
+                    fontsize=14, fontweight='bold')
+        ax.legend(title='Cenário')
+        ax.grid(True, linestyle='--', alpha=0.5)
+        ax.yaxis.set_major_formatter(br_formatter)
+        
+        # Ajustar ticks do eixo x
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        
+        st.pyplot(fig)
+        
+        # =====================================================================
+        # 6. GRÁFICO: COMPARAÇÃO ANUAL
+        # =====================================================================
+        
+        st.subheader("📈 Comparação Anual das Emissões")
+        
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+        
+        # Gráfico 1: Emissões anuais totais
+        bar_width = 0.25
+        x_pos = np.arange(len(df_anual['Ano']))
+        
+        ax1.bar(x_pos - bar_width, df_anual['Aterro_CH4_kg_dia'], bar_width, 
+                label='Aterro', color='red', alpha=0.7)
+        ax1.bar(x_pos, df_anual['Vermicompostagem_CH4_kg_dia'], bar_width, 
+                label='Vermicompostagem', color='green', alpha=0.7)
+        ax1.bar(x_pos + bar_width, df_anual['Compostagem_CH4_kg_dia'], bar_width, 
+                label='Compostagem', color='blue', alpha=0.7)
+        
+        ax1.set_xlabel('Ano')
+        ax1.set_ylabel('Metano Anual (kg CH₄)')
+        ax1.set_title('Emissões Anuais de Metano por Cenário')
+        ax1.set_xticks(x_pos)
+        ax1.set_xticklabels(df_anual['Ano'])
+        ax1.legend()
+        ax1.yaxis.set_major_formatter(br_formatter)
+        ax1.grid(axis='y', linestyle='--', alpha=0.5)
+        
+        # Gráfico 2: Redução acumulada anual
+        ax2.plot(df_anual['Ano'], df_anual['Reducao_Vermi'], 'g-', 
+                label='Redução Vermicompostagem', linewidth=2, marker='o')
+        ax2.plot(df_anual['Ano'], df_anual['Reducao_Compost'], 'b-', 
+                label='Redução Compostagem', linewidth=2, marker='s')
+        
+        ax2.set_xlabel('Ano')
+        ax2.set_ylabel('Metano Evitado Acumulado (kg CH₄)')
+        ax2.set_title('Redução Acumulada de Metano vs Aterro')
+        ax2.legend()
+        ax2.yaxis.set_major_formatter(br_formatter)
+        ax2.grid(True, linestyle='--', alpha=0.5)
+        
+        plt.tight_layout()
+        st.pyplot(fig)
+        
+        # =====================================================================
+        # 7. ANÁLISE FINANCEIRA PARA ENTRADA CONTÍNUA
+        # =====================================================================
+        
+        st.header("💰 Análise Financeira - Entrada Contínua")
+        
+        # Converter metano para CO₂eq (GWP CH₄ = 27.9 para 100 anos - IPCC AR6)
+        GWP_CH4 = 27.9  # kg CO₂eq por kg CH₄
+        
+        total_evitado_vermi_kg = (total_aterro_cont - total_vermi_cont) * GWP_CH4
+        total_evitado_vermi_tco2eq = total_evitado_vermi_kg / 1000
+        
+        total_evitado_compost_kg = (total_aterro_cont - total_compost_cont) * GWP_CH4
+        total_evitado_compost_tco2eq = total_evitado_compost_kg / 1000
+        
+        # Simular cenários financeiros
+        cenarios_vermi = simular_cenarios_financeiros(
+            total_evitado_vermi_tco2eq, 
+            st.session_state.preco_carbono,
+            st.session_state.taxa_cambio
+        )
+        
+        cenarios_compost = simular_cenarios_financeiros(
+            total_evitado_compost_tco2eq,
+            st.session_state.preco_carbono,
+            st.session_state.taxa_cambio
+        )
+        
+        # Exibir métricas de CO₂eq
+        st.subheader("🌍 Impacto Total em CO₂eq (20 anos)")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric(
+                "Vermicompostagem",
+                f"{formatar_br(total_evitado_vermi_tco2eq)} tCO₂eq",
+                help=f"Total evitado em {anos_simulacao} anos"
+            )
+        
+        with col2:
+            st.metric(
+                "Compostagem",
+                f"{formatar_br(total_evitado_compost_tco2eq)} tCO₂eq",
+                help=f"Total evitado em {anos_simulacao} anos"
+            )
+        
+        # Métricas anuais de CO₂eq
+        st.subheader("📊 Impacto Anual em CO₂eq")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            media_anual_vermi_co2 = total_evitado_vermi_tco2eq / anos_simulacao
+            st.metric(
+                "Vermicompostagem (média anual)",
+                f"{formatar_br(media_anual_vermi_co2)} tCO₂eq/ano",
+                help="Redução média anual"
+            )
+        
+        with col2:
+            media_anual_compost_co2 = total_evitado_compost_tco2eq / anos_simulacao
+            st.metric(
+                "Compostagem (média anual)",
+                f"{formatar_br(media_anual_compost_co2)} tCO₂eq/ano",
+                help="Redução média anual"
+            )
+        
+        with col3:
+            diferenca_percentual = ((total_evitado_vermi_tco2eq - total_evitado_compost_tco2eq) / total_evitado_compost_tco2eq * 100) if total_evitado_compost_tco2eq > 0 else 0
+            st.metric(
+                "Diferença",
+                f"{diferenca_percentual:+.2f}%",
+                help="Vermicompostagem vs Compostagem"
+            )
+        
+        # Tabela comparativa de cenários financeiros
+        st.subheader("📊 Comparação de Cenários Financeiros (20 anos)")
+        
+        dados_comparativos = []
+        for cenario in ['Otimista (Mercado Regulado)', 'Base (Mercado Voluntário)', 'Pessimista (Sem Créditos)']:
+            dados_comparativos.append({
+                'Cenário': cenario,
+                'Descrição': cenarios_vermi[cenario]['descricao'],
+                'Vermicompostagem (R$)': formatar_br(cenarios_vermi[cenario]['valor_total']),
+                'Compostagem (R$)': formatar_br(cenarios_compost[cenario]['valor_total']),
+                'Diferença (R$)': formatar_br(cenarios_vermi[cenario]['valor_total'] - cenarios_compost[cenario]['valor_total']),
+                'Valor Anual (R$/ano)': formatar_br(cenarios_vermi[cenario]['valor_total'] / anos_simulacao)
+            })
+        
+        df_comparativo = pd.DataFrame(dados_comparativos)
+        st.dataframe(df_comparativo, use_container_width=True)
+        
+        # =====================================================================
+        # 8. RESUMO DETALHADO - ENTRADA CONTÍNUA
+        # =====================================================================
+        
+        with st.expander("📋 Resumo Detalhado da Análise - Entrada Contínua", expanded=False):
+            st.markdown(f"""
+            ### **Resumo da Análise - Entrada Contínua ({anos_simulacao} anos)**
+            
+            **Parâmetros Utilizados:**
+            - Lote diário: {residuos_kg_dia} kg/dia
+            - Umidade: {umidade_valor}% ({formatar_br(umidade)} fração)
+            - Temperatura: {temperatura}°C
+            - Período: {anos_simulacao} anos ({dias_total} dias)
+            - GWP CH₄ (IPCC AR6): 27.9 kg CO₂eq/kg CH₄
+            
+            **Resultados de Metano Acumulado ({anos_simulacao} anos):**
+            - **Aterro Sanitário:** {formatar_br(total_aterro_cont)} kg CH₄
+            - **Vermicompostagem:** {formatar_br(total_vermi_cont)} kg CH₄
+            - **Compostagem Termofílica:** {formatar_br(total_compost_cont)} kg CH₄
+            
+            **Reduções em Relação ao Aterro:**
+            - **Vermicompostagem:** {formatar_br(total_aterro_cont - total_vermi_cont)} kg CH₄ ({formatar_br(reducao_vermi_perc)}%)
+            - **Compostagem:** {formatar_br(total_aterro_cont - total_compost_cont)} kg CH₄ ({formatar_br(reducao_compost_perc)}%)
+            
+            **Em CO₂eq Evitadas ({anos_simulacao} anos):**
+            - **Vermicompostagem:** {formatar_br(total_evitado_vermi_tco2eq)} tCO₂eq
+            - **Compostagem:** {formatar_br(total_evitado_compost_tco2eq)} tCO₂eq
+            - **Diferença:** {diferenca_percentual:+.2f}%
+            
+            **Métricas Anuais Médias:**
+            - **Aterro:** {formatar_br(media_anual_aterro)} kg CH₄/ano
+            - **Vermicompostagem:** {formatar_br(media_anual_vermi)} kg CH₄/ano
+            - **Compostagem:** {formatar_br(media_anual_compost)} kg CH₄/ano
+            - **Redução Vermicompostagem:** {formatar_br(media_anual_vermi_co2)} tCO₂eq/ano
+            - **Redução Compostagem:** {formatar_br(media_anual_compost_co2)} tCO₂eq/ano
+            
+            **Cenário Financeiro Mais Favorável (Regulado - {anos_simulacao} anos):**
+            - **Vermicompostagem:** R$ {formatar_br(cenarios_vermi['Otimista (Mercado Regulado)']['valor_total'])}
+            - **Compostagem:** R$ {formatar_br(cenarios_compost['Otimista (Mercado Regulado)']['valor_total'])}
+            
+            **Valor Anual Médio (Regulado):**
+            - **Vermicompostagem:** R$ {formatar_br(cenarios_vermi['Otimista (Mercado Regulado)']['valor_total'] / anos_simulacao)}/ano
+            - **Compostagem:** R$ {formatar_br(cenarios_compost['Otimista (Mercado Regulado)']['valor_total'] / anos_simulacao)}/ano
+            
+            **💡 Conclusão:**
+            A simulação de entrada contínua mostra que, ao longo de {anos_simulacao} anos, a vermicompostagem 
+            apresenta uma redução significativa de {formatar_br(reducao_vermi_perc)}% nas emissões de metano 
+            em comparação com o aterro, enquanto a compostagem reduz {formatar_br(reducao_compost_perc)}%.
+            
+            **⚖️ Viabilidade Financeira em Larga Escala:**
+            - **Mercado Regulado:** Projeto altamente atrativo, com retorno financeiro significativo
+            - **Mercado Voluntário:** Viabilidade moderada, pode ser complementado com outras receitas
+            - **Sem Créditos:** Necessidade de políticas públicas ou incentivos para viabilizar
+            """)
+
 else:
-    st.info("💡 Configure os parâmetros no painel lateral e clique em 'Calcular Potencial de Metano' para iniciar a simulação.")
+    st.info("💡 Configure os parâmetros no painel lateral e clique no botão correspondente para iniciar a simulação.")
 
 # =============================================================================
 # RODAPÉ
@@ -835,4 +1406,5 @@ st.markdown("""
 - EU ETS Market Data (2024). European Carbon Futures
 
 **🔧 Desenvolvido para análise comparativa de potenciais de metano em diferentes cenários de gestão de resíduos.**
+**🔄 Nova Funcionalidade: Simulação de entrada contínua (1 lote/dia por 20 anos) baseada no script v2n_noAr.**
 """)

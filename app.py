@@ -705,20 +705,29 @@ if st.session_state.get('run_simulation', False):
         col1, col2 = st.columns(2)
         
         with col1:
+            # Formatar com 6 casas decimais para mostrar diferenças sutis
+            valor_vermi_formatado = f"{total_evitado_vermi_tco2eq:,.6f}".replace(",", "X").replace(".", ",").replace("X", ".")
             st.metric(
                 "Vermicompostagem",
-                f"{formatar_br(total_evitado_vermi_tco2eq)} tCO₂eq",
+                f"{valor_vermi_formatado} tCO₂eq",
                 help=f"Equivalente a {formatar_br(total_evitado_vermi_tco2eq * 1000)} kg CO₂eq"
             )
         
         with col2:
+            # Formatar com 6 casas decimais para mostrar diferenças sutis
+            valor_compost_formatado = f"{total_evitado_compost_tco2eq:,.6f}".replace(",", "X").replace(".", ",").replace("X", ".")
             st.metric(
                 "Compostagem",
-                f"{formatar_br(total_evitado_compost_tco2eq)} tCO₂eq",
+                f"{valor_compost_formatado} tCO₂eq",
                 help=f"Equivalente a {formatar_br(total_evitado_compost_tco2eq * 1000)} kg CO₂eq"
             )
         
-        # Exibir tabela comparativa
+        # Calcular e mostrar a diferença percentual
+        diferenca_percentual = ((total_evitado_vermi_tco2eq - total_evitado_compost_tco2eq) / total_evitado_compost_tco2eq * 100) if total_evitado_compost_tco2eq > 0 else 0
+        
+        st.caption(f"📊 **Diferença:** A vermicompostagem evita {diferenca_percentual:+.4f}% mais emissões que a compostagem termofílica")
+        
+        # Exibir tabela comparativa com mais casas decimais
         st.subheader("📊 Comparação de Cenários Financeiros")
         
         dados_comparativos = []
@@ -791,9 +800,10 @@ if st.session_state.get('run_simulation', False):
             - **Vermicompostagem:** {formatar_br(total_aterro - total_vermi)} kg CH₄ ({formatar_br(reducao_vermi_perc)}%)
             - **Compostagem:** {formatar_br(total_aterro - total_compost)} kg CH₄ ({formatar_br(reducao_compost_perc)}%)
             
-            **Em CO₂eq Evitadas:**
-            - **Vermicompostagem:** {formatar_br(total_evitado_vermi_tco2eq)} tCO₂eq
-            - **Compostagem:** {formatar_br(total_evitado_compost_tco2eq)} tCO₂eq
+            **Em CO₂eq Evitadas (com alta precisão):**
+            - **Vermicompostagem:** {valor_vermi_formatado} tCO₂eq
+            - **Compostagem:** {valor_compost_formatado} tCO₂eq
+            - **Diferença:** {diferenca_percentual:+.4f}%
             
             **Cenário Financeiro Mais Favorável (Regulado):**
             - **Vermicompostagem:** R$ {formatar_br(cenarios_vermi['Otimista (Mercado Regulado)']['valor_total'])}

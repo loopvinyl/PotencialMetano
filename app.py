@@ -8,9 +8,10 @@ from matplotlib.ticker import FuncFormatter
 import requests
 from bs4 import BeautifulSoup
 import warnings
-from scipy.signal import fftconvolve
 
-# Configurações iniciais
+# =============================================================================
+# CONFIGURAÇÕES INICIAIS
+# =============================================================================
 st.set_page_config(
     page_title="Potencial de Metano - Simulação Aterro vs Compostagem", 
     layout="wide",
@@ -25,7 +26,7 @@ plt.rcParams['font.size'] = 10
 sns.set_style("whitegrid")
 
 # =============================================================================
-# FUNÇÕES DE COTAÇÃO DO CARBONO E CÂMBIO
+# FUNÇÕES DE COTAÇÃO DO CARBONO E CÂMBIO (MANTIDAS)
 # =============================================================================
 
 def obter_cotacao_carbono_investing():
@@ -114,15 +115,13 @@ def obter_cotacao_euro_real():
     return 6.36, "R$", False, "Reference Rate for EU ETS"
 
 # =============================================================================
-# FUNÇÕES DE CÁLCULO DE EMISSÕES - COMPLETAS (CH4 + N2O)
+# FUNÇÕES PARA ANÁLISE POR LOTE (100 kg) - ABA 1
 # =============================================================================
 
 def calcular_potencial_metano_aterro(residuos_kg, umidade, temperatura, dias=365):
     """
     Calcula o potencial de geração de metano de um lote de resíduos no aterro
     Baseado na metodologia IPCC 2006
-    
-    Fórmula: CH4 = Resíduos × DOC × DOCf × MCF × F × (16/12) × (1 - OX) × (1 - Ri)
     """
     # Parâmetros fixos (IPCC 2006)
     DOC = 0.15  # Carbono orgânico degradável (fração)
@@ -153,42 +152,19 @@ def calcular_potencial_metano_aterro(residuos_kg, umidade, temperatura, dias=365
     # Distribuir o potencial total ao longo do tempo
     emissoes_CH4 = potencial_CH4_total * kernel_ch4
     
-    # Cálculo de N2O para aterro (Wang et al. 2017)
-    # Fator de emissão médio: 2.15 g N2O-N/ton MSW
-    E_medio = 2.15  # g N2O-N/ton MSW
-    # Converter para kg N2O por kg resíduo
-    emissao_n2o_por_kg = (E_medio * (44/28) / 1_000_000) * (1 - umidade)
-    emissao_n2o_diaria = residuos_kg * emissao_n2o_por_kg
-    
-    # Perfil temporal N2O (5 dias)
-    perfil_n2o = np.array([0.10, 0.30, 0.40, 0.15, 0.05])
-    perfil_n2o = perfil_n2o / perfil_n2o.sum()
-    
-    # Distribuir emissões de N2O
-    emissoes_N2O = np.zeros(dias)
-    for i in range(dias):
-        for j, frac in enumerate(perfil_n2o):
-            if i + j < dias:
-                emissoes_N2O[i + j] += emissao_n2o_diaria * frac
-    
-    return emissoes_CH4, emissoes_N2O, potencial_CH4_total, DOCf
+    return emissoes_CH4, potencial_CH4_total, DOCf
 
 def calcular_emissoes_vermicompostagem(residuos_kg, umidade, dias=50):
     """
-    Calcula emissões de metano e N2O na vermicompostagem (Yang et al. 2017)
+    Calcula emissões de metano na vermicompostagem (Yang et al. 2017)
     """
     # Parâmetros fixos para vermicompostagem
     TOC = 0.436  # Fração de carbono orgânico total
-    TN = 14.2 / 1000  # Fração de nitrogênio total
     CH4_C_FRAC = 0.13 / 100  # Fração do TOC emitida como CH4-C (0.13%)
-    N2O_N_FRAC = 0.92 / 100  # Fração do TN emitida como N2O-N (0.92%)
     fracao_ms = 1 - umidade  # Fração de matéria seca
     
     # Metano total por lote
     ch4_total_por_lote = residuos_kg * (TOC * CH4_C_FRAC * (16/12) * fracao_ms)
-    
-    # N2O total por lote
-    n2o_total_por_lote = residuos_kg * (TN * N2O_N_FRAC * (44/28) * fracao_ms)
     
     # Perfil temporal baseado em Yang et al. (2017)
     perfil_ch4 = np.array([
@@ -204,45 +180,25 @@ def calcular_emissoes_vermicompostagem(residuos_kg, umidade, dias=50):
         0.001, 0.001, 0.001, 0.001, 0.001   # Dias 46-50
     ])
     
-    perfil_n2o = np.array([
-        0.15, 0.10, 0.20, 0.05, 0.03,  # Dias 1-5
-        0.03, 0.03, 0.04, 0.05, 0.06,  # Dias 6-10
-        0.08, 0.09, 0.10, 0.08, 0.07,  # Dias 11-15
-        0.06, 0.05, 0.04, 0.03, 0.02,  # Dias 16-20
-        0.01, 0.01, 0.005, 0.005, 0.005,  # Dias 21-25
-        0.005, 0.005, 0.005, 0.005, 0.005,  # Dias 26-30
-        0.002, 0.002, 0.002, 0.002, 0.002,  # Dias 31-35
-        0.001, 0.001, 0.001, 0.001, 0.001,  # Dias 36-40
-        0.001, 0.001, 0.001, 0.001, 0.001,  # Dias 41-45
-        0.001, 0.001, 0.001, 0.001, 0.001   # Dias 46-50
-    ])
-    
-    # Normalizar perfis
+    # Normalizar perfil
     perfil_ch4 = perfil_ch4 / perfil_ch4.sum()
-    perfil_n2o = perfil_n2o / perfil_n2o.sum()
     
     # Distribuir emissões
     emissoes_CH4 = ch4_total_por_lote * perfil_ch4
-    emissoes_N2O = n2o_total_por_lote * perfil_n2o
     
-    return emissoes_CH4, emissoes_N2O, ch4_total_por_lote, n2o_total_por_lote
+    return emissoes_CH4, ch4_total_por_lote
 
 def calcular_emissoes_compostagem(residuos_kg, umidade, dias=50):
     """
-    Calcula emissões de metano e N2O na compostagem termofílica (Yang et al. 2017)
+    Calcula emissões de metano na compostagem termofílica (Yang et al. 2017)
     """
     # Parâmetros fixos para compostagem termofílica
     TOC = 0.436  # Fração de carbono orgânico total
-    TN = 14.2 / 1000  # Fração de nitrogênio total
     CH4_C_FRAC = 0.006  # Fração do TOC emitida como CH4-C (0.6%)
-    N2O_N_FRAC = 0.0196  # Fração do TN emitida como N2O-N (1.96%)
     fracao_ms = 1 - umidade  # Fração de matéria seca
     
     # Metano total por lote
     ch4_total_por_lote = residuos_kg * (TOC * CH4_C_FRAC * (16/12) * fracao_ms)
-    
-    # N2O total por lote
-    n2o_total_por_lote = residuos_kg * (TN * N2O_N_FRAC * (44/28) * fracao_ms)
     
     # Perfil temporal para compostagem termofílica
     perfil_ch4 = np.array([
@@ -258,251 +214,217 @@ def calcular_emissoes_compostagem(residuos_kg, umidade, dias=50):
         0.001, 0.001, 0.001, 0.001, 0.001   # Dias 46-50
     ])
     
-    perfil_n2o = np.array([
-        0.10, 0.08, 0.15, 0.05, 0.03,  # Dias 1-5
-        0.04, 0.05, 0.07, 0.10, 0.12,  # Dias 6-10
-        0.15, 0.18, 0.20, 0.18, 0.15,  # Dias 11-15 (pico termofílico)
-        0.12, 0.10, 0.08, 0.06, 0.05,  # Dias 16-20
-        0.04, 0.03, 0.02, 0.02, 0.01,  # Dias 21-25
-        0.01, 0.01, 0.01, 0.01, 0.01,  # Dias 26-30
-        0.005, 0.005, 0.005, 0.005, 0.005,  # Dias 31-35
-        0.002, 0.002, 0.002, 0.002, 0.002,  # Dias 36-40
-        0.001, 0.001, 0.001, 0.001, 0.001,  # Dias 41-45
-        0.001, 0.001, 0.001, 0.001, 0.001,   # Dias 46-50
-    ])
-    
-    # Normalizar perfis
+    # Normalizar perfil
     perfil_ch4 = perfil_ch4 / perfil_ch4.sum()
-    perfil_n2o = perfil_n2o / perfil_n2o.sum()
     
     # Distribuir emissões
     emissoes_CH4 = ch4_total_por_lote * perfil_ch4
-    emissoes_N2O = n2o_total_por_lote * perfil_n2o
     
-    return emissoes_CH4, emissoes_N2O, ch4_total_por_lote, n2o_total_por_lote
+    return emissoes_CH4, ch4_total_por_lote
 
 # =============================================================================
-# NOVAS FUNÇÕES PARA SIMULAÇÃO CONTÍNUA (1 LOTE POR DIA POR 20 ANOS)
+# FUNÇÕES PARA ENTRADA CONTÍNUA (kg/dia) - ABA 2
 # =============================================================================
 
-def calcular_emissoes_aterro_continuo(residuos_kg_dia, umidade, temperatura, anos=20):
+def calcular_emissoes_aterro_completo_continuo(residuos_kg_dia, umidade, temperatura, doc_val, 
+                                               massa_exposta_kg, h_exposta, dias_simulacao):
     """
-    Calcula emissões de metano e N2O do aterro com entrada contínua de 1 lote por dia
-    Baseado no script v2n_noAr - simulação de 20 anos
+    Calcula CH₄ + N₂O do aterro para entrada contínua
+    Baseado no Script 2 (Zziwa et al. adaptado)
     """
-    dias = anos * 365
-    
-    # Parâmetros fixos (IPCC 2006)
-    DOC = 0.15  # Carbono orgânico degradável (fração)
-    MCF = 1.0   # Fator de correção de metano (para aterros sanitários)
-    F = 0.5     # Fração de metano no biogás
-    OX = 0.1    # Fator de oxidação
-    Ri = 0.0    # Metano recuperado
-    
-    # DOCf calculado pela temperatura (DOCf = 0.0147 × T + 0.28)
-    DOCf = 0.0147 * temperatura + 0.28
-    
-    # Cálculo do potencial de metano por kg de resíduo
-    potencial_CH4_por_kg = DOC * DOCf * MCF * F * (16/12) * (1 - Ri) * (1 - OX)
-    
-    # Potencial diário
-    potencial_CH4_diario = residuos_kg_dia * potencial_CH4_por_kg
-    
-    # Constante de decaimento anual
+    # Parâmetros fixos do aterro
+    MCF = 1.0
+    F = 0.5
+    OX = 0.1
+    Ri = 0.0
     k_ano = 0.06
     
-    # Kernel de decaimento (primeira ordem)
-    t = np.arange(1, dias + 1, dtype=float)
+    # 1. CÁLCULO DE CH₄ (METANO)
+    DOCf = 0.0147 * temperatura + 0.28
+    potencial_CH4_por_kg = doc_val * DOCf * MCF * F * (16/12) * (1 - Ri) * (1 - OX)
+    potencial_CH4_lote_diario = residuos_kg_dia * potencial_CH4_por_kg
+    
+    # Perfil temporal de decaimento
+    t = np.arange(1, dias_simulacao + 1, dtype=float)
     kernel_ch4 = np.exp(-k_ano * (t - 1) / 365.0) - np.exp(-k_ano * t / 365.0)
+    kernel_ch4 = kernel_ch4 / kernel_ch4.sum()  # Normalizar
     
-    # Convolução: entrada diária constante com o kernel
-    entradas_diarias = np.ones(dias, dtype=float)
-    emissoes_CH4 = fftconvolve(entradas_diarias, kernel_ch4, mode='full')[:dias]
-    emissoes_CH4 *= potencial_CH4_diario
+    entradas_diarias = np.ones(dias_simulacao, dtype=float)
+    emissoes_CH4 = np.convolve(entradas_diarias, kernel_ch4, mode='full')[:dias_simulacao]
+    emissoes_CH4 *= potencial_CH4_lote_diario
     
-    # Cálculo de N2O para aterro (Wang et al. 2017)
-    # Fator de emissão médio: 2.15 g N2O-N/ton MSW
-    E_medio = 2.15  # g N2O-N/ton MSW
-    # Converter para kg N2O por kg resíduo
-    emissao_n2o_por_kg = (E_medio * (44/28) / 1_000_000) * (1 - umidade)
-    emissao_n2o_diaria = residuos_kg_dia * emissao_n2o_por_kg
+    # 2. CÁLCULO DE N₂O (ÓXIDO NITROSO)
+    fator_umid = (1 - umidade) / (1 - 0.55)
+    f_aberto = np.clip((massa_exposta_kg / residuos_kg_dia) * (h_exposta / 24), 0.0, 1.0)
     
-    # Perfil temporal N2O (5 dias)
-    perfil_n2o = np.array([0.10, 0.30, 0.40, 0.15, 0.05])
-    perfil_n2o = perfil_n2o / perfil_n2o.sum()
+    E_aberto = 1.91  # g N₂O-N/ton
+    E_fechado = 2.15  # g N₂O-N/ton
+    E_medio = f_aberto * E_aberto + (1 - f_aberto) * E_fechado
+    E_medio_ajust = E_medio * fator_umid
     
-    # Convolução para N2O
-    emissoes_N2O = fftconvolve(np.full(dias, emissao_n2o_diaria), perfil_n2o, mode='full')[:dias]
+    # Emissão diária de N₂O (kg/dia)
+    emissao_diaria_N2O = (E_medio_ajust * (44/28) / 1_000_000) * residuos_kg_dia
     
-    # Totais acumulados
-    total_ch4 = np.sum(emissoes_CH4)
-    total_n2o = np.sum(emissoes_N2O)
+    # Perfil temporal de N₂O (5 dias - Wang et al. 2017)
+    kernel_n2o = np.array([0.10, 0.30, 0.40, 0.15, 0.05], dtype=float)
+    emissoes_N2O = np.convolve(np.full(dias_simulacao, emissao_diaria_N2O), kernel_n2o, mode='full')[:dias_simulacao]
     
-    return emissoes_CH4, emissoes_N2O, total_ch4, total_n2o, DOCf
+    # 3. EMISSÕES PRÉ-DESCARTE (Feng et al. 2020)
+    CH4_pre_descarte_ugC_por_kg_h_media = 2.78
+    fator_conversao_C_para_CH4 = 16/12
+    CH4_pre_descarte_ugCH4_por_kg_h_media = CH4_pre_descarte_ugC_por_kg_h_media * fator_conversao_C_para_CH4
+    CH4_pre_descarte_g_por_kg_dia = CH4_pre_descarte_ugCH4_por_kg_h_media * 24 / 1_000_000
+    
+    N2O_pre_descarte_mgN_por_kg = 20.26
+    N2O_pre_descarte_mgN_por_kg_dia = N2O_pre_descarte_mgN_por_kg / 3
+    N2O_pre_descarte_g_por_kg_dia = N2O_pre_descarte_mgN_por_kg_dia * (44/28) / 1000
+    
+    emissoes_CH4_pre_descarte_kg = np.full(dias_simulacao, residuos_kg_dia * CH4_pre_descarte_g_por_kg_dia / 1000)
+    emissoes_N2O_pre_descarte_kg = np.zeros(dias_simulacao)
+    
+    # Perfil N₂O pré-descarte (3 dias)
+    PERFIL_N2O_PRE_DESCARTE = {1: 0.8623, 2: 0.10, 3: 0.0377}
+    
+    for dia_entrada in range(dias_simulacao):
+        for dias_apos_descarte, fracao in PERFIL_N2O_PRE_DESCARTE.items():
+            dia_emissao = dia_entrada + dias_apos_descarte - 1
+            if dia_emissao < dias_simulacao:
+                emissoes_N2O_pre_descarte_kg[dia_emissao] += (
+                    residuos_kg_dia * N2O_pre_descarte_g_por_kg_dia * fracao / 1000
+                )
+    
+    # 4. TOTAL DE EMISSÕES DO ATERRO
+    total_ch4_aterro_kg = emissoes_CH4 + emissoes_CH4_pre_descarte_kg
+    total_n2o_aterro_kg = emissoes_N2O + emissoes_N2O_pre_descarte_kg
+    
+    return total_ch4_aterro_kg, total_n2o_aterro_kg, DOCf
 
-def calcular_emissoes_vermicompostagem_continuo(residuos_kg_dia, umidade, anos=20):
+def calcular_emissoes_vermi_completo_continuo(residuos_kg_dia, umidade, dias_simulacao):
     """
-    Calcula emissões de metano e N2O na vermicompostagem com entrada contínua
+    Calcula CH₄ + N₂O da vermicompostagem para entrada contínua
+    Baseado em Yang et al. (2017)
     """
-    dias = anos * 365
+    # Parâmetros fixos
+    TOC_YANG = 0.436  # Fração de carbono orgânico total
+    TN_YANG = 14.2 / 1000  # Fração de nitrogênio total
+    CH4_C_FRAC_YANG = 0.13 / 100  # 0.13%
+    N2O_N_FRAC_YANG = 0.92 / 100  # 0.92%
     
-    # Parâmetros fixos para vermicompostagem
-    TOC = 0.436  # Fração de carbono orgânico total
-    TN = 14.2 / 1000  # Fração de nitrogênio total
-    CH4_C_FRAC = 0.13 / 100  # Fração do TOC emitida como CH4-C (0.13%)
-    N2O_N_FRAC = 0.92 / 100  # Fração do TN emitida como N2O-N (0.92%)
-    fracao_ms = 1 - umidade  # Fração de matéria seca
+    fracao_ms = 1 - umidade
     
-    # Metano e N2O totais por lote diário
-    ch4_total_por_lote = residuos_kg_dia * (TOC * CH4_C_FRAC * (16/12) * fracao_ms)
-    n2o_total_por_lote = residuos_kg_dia * (TN * N2O_N_FRAC * (44/28) * fracao_ms)
+    # Metano total por lote diário
+    ch4_total_por_lote_diario = residuos_kg_dia * (TOC_YANG * CH4_C_FRAC_YANG * (16/12) * fracao_ms)
     
-    # Perfil temporal (50 dias)
-    perfil_ch4 = np.array([
-        0.02, 0.02, 0.02, 0.03, 0.03,  # Dias 1-5
-        0.04, 0.04, 0.05, 0.05, 0.06,  # Dias 6-10
-        0.07, 0.08, 0.09, 0.10, 0.09,  # Dias 11-15
-        0.08, 0.07, 0.06, 0.05, 0.04,  # Dias 16-20
-        0.03, 0.02, 0.02, 0.01, 0.01,  # Dias 21-25
-        0.01, 0.01, 0.01, 0.01, 0.01,  # Dias 26-30
-        0.005, 0.005, 0.005, 0.005, 0.005,  # Dias 31-35
-        0.005, 0.005, 0.005, 0.005, 0.005,  # Dias 36-40
-        0.002, 0.002, 0.002, 0.002, 0.002,  # Dias 41-45
-        0.001, 0.001, 0.001, 0.001, 0.001   # Dias 46-50
+    # Óxido nitroso total por lote diário
+    n2o_total_por_lote_diario = residuos_kg_dia * (TN_YANG * N2O_N_FRAC_YANG * (44/28) * fracao_ms)
+    
+    # Perfis temporais (50 dias)
+    PERFIL_CH4_VERMI = np.array([
+        0.02, 0.02, 0.02, 0.03, 0.03, 0.04, 0.04, 0.05, 0.05, 0.06,
+        0.07, 0.08, 0.09, 0.10, 0.09, 0.08, 0.07, 0.06, 0.05, 0.04,
+        0.03, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01,
+        0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005,
+        0.002, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001, 0.001, 0.001, 0.001
     ])
+    PERFIL_CH4_VERMI /= PERFIL_CH4_VERMI.sum()
     
-    perfil_n2o = np.array([
-        0.15, 0.10, 0.20, 0.05, 0.03,  # Dias 1-5
-        0.03, 0.03, 0.04, 0.05, 0.06,  # Dias 6-10
-        0.08, 0.09, 0.10, 0.08, 0.07,  # Dias 11-15
-        0.06, 0.05, 0.04, 0.03, 0.02,  # Dias 16-20
-        0.01, 0.01, 0.005, 0.005, 0.005,  # Dias 21-25
-        0.005, 0.005, 0.005, 0.005, 0.005,  # Dias 26-30
-        0.002, 0.002, 0.002, 0.002, 0.002,  # Dias 31-35
-        0.001, 0.001, 0.001, 0.001, 0.001,  # Dias 36-40
-        0.001, 0.001, 0.001, 0.001, 0.001,  # Dias 41-45
-        0.001, 0.001, 0.001, 0.001, 0.001   # Dias 46-50
+    PERFIL_N2O_VERMI = np.array([
+        0.15, 0.10, 0.20, 0.05, 0.03, 0.03, 0.03, 0.04, 0.05, 0.06,
+        0.08, 0.09, 0.10, 0.08, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02,
+        0.01, 0.01, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005,
+        0.002, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001, 0.001, 0.001, 0.001,
+        0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001
     ])
+    PERFIL_N2O_VERMI /= PERFIL_N2O_VERMI.sum()
     
-    # Normalizar perfis
-    perfil_ch4 = perfil_ch4 / perfil_ch4.sum()
-    perfil_n2o = perfil_n2o / perfil_n2o.sum()
+    # Inicializar arrays de emissões
+    emissoes_CH4 = np.zeros(dias_simulacao)
+    emissoes_N2O = np.zeros(dias_simulacao)
     
-    # Convolução: entrada diária constante com os perfis
-    entradas_diarias = np.ones(dias, dtype=float)
-    emissoes_CH4 = fftconvolve(entradas_diarias, perfil_ch4, mode='full')[:dias]
-    emissoes_CH4 *= ch4_total_por_lote
+    # Convolução para entrada contínua
+    for dia_entrada in range(dias_simulacao):
+        for dia_compostagem in range(len(PERFIL_CH4_VERMI)):
+            dia_emissao = dia_entrada + dia_compostagem
+            if dia_emissao < dias_simulacao:
+                emissoes_CH4[dia_emissao] += ch4_total_por_lote_diario * PERFIL_CH4_VERMI[dia_compostagem]
+                emissoes_N2O[dia_emissao] += n2o_total_por_lote_diario * PERFIL_N2O_VERMI[dia_compostagem]
     
-    emissoes_N2O = fftconvolve(entradas_diarias, perfil_n2o, mode='full')[:dias]
-    emissoes_N2O *= n2o_total_por_lote
-    
-    # Totais acumulados
-    total_ch4 = np.sum(emissoes_CH4)
-    total_n2o = np.sum(emissoes_N2O)
-    
-    return emissoes_CH4, emissoes_N2O, total_ch4, total_n2o
+    return emissoes_CH4, emissoes_N2O
 
-def calcular_emissoes_compostagem_continuo(residuos_kg_dia, umidade, anos=20):
+def calcular_emissoes_compostagem_completo_continuo(residuos_kg_dia, umidade, dias_simulacao):
     """
-    Calcula emissões de metano e N2O na compostagem termofílica com entrada contínua
+    Calcula CH₄ + N₂O da compostagem termofílica para entrada contínua
+    Baseado em Yang et al. (2017)
     """
-    dias = anos * 365
+    # Parâmetros fixos
+    TOC_YANG = 0.436
+    TN_YANG = 14.2 / 1000
+    CH4_C_FRAC_THERMO = 0.006  # 0.6%
+    N2O_N_FRAC_THERMO = 0.0196  # 1.96%
     
-    # Parâmetros fixos para compostagem termofílica
-    TOC = 0.436  # Fração de carbono orgânico total
-    TN = 14.2 / 1000  # Fração de nitrogênio total
-    CH4_C_FRAC = 0.006  # Fração do TOC emitida como CH4-C (0.6%)
-    N2O_N_FRAC = 0.0196  # Fração do TN emitida como N2O-N (1.96%)
-    fracao_ms = 1 - umidade  # Fração de matéria seca
+    fracao_ms = 1 - umidade
     
-    # Metano e N2O totais por lote diário
-    ch4_total_por_lote = residuos_kg_dia * (TOC * CH4_C_FRAC * (16/12) * fracao_ms)
-    n2o_total_por_lote = residuos_kg_dia * (TN * N2O_N_FRAC * (44/28) * fracao_ms)
+    # Totais por lote diário
+    ch4_total_por_lote_diario = residuos_kg_dia * (TOC_YANG * CH4_C_FRAC_THERMO * (16/12) * fracao_ms)
+    n2o_total_por_lote_diario = residuos_kg_dia * (TN_YANG * N2O_N_FRAC_THERMO * (44/28) * fracao_ms)
     
-    # Perfil temporal para compostagem termofílica (50 dias)
-    perfil_ch4 = np.array([
-        0.01, 0.02, 0.03, 0.05, 0.08,  # Dias 1-5
-        0.12, 0.15, 0.18, 0.20, 0.18,  # Dias 6-10 (pico termofílico)
-        0.15, 0.12, 0.10, 0.08, 0.06,  # Dias 11-15
-        0.05, 0.04, 0.03, 0.02, 0.02,  # Dias 16-20
-        0.01, 0.01, 0.01, 0.01, 0.01,  # Dias 21-25
-        0.005, 0.005, 0.005, 0.005, 0.005,  # Dias 26-30
-        0.002, 0.002, 0.002, 0.002, 0.002,  # Dias 31-35
-        0.001, 0.001, 0.001, 0.001, 0.001,  # Dias 36-40
-        0.001, 0.001, 0.001, 0.001, 0.001,  # Dias 41-45
-        0.001, 0.001, 0.001, 0.001, 0.001   # Dias 46-50
+    # Perfis temporais (50 dias)
+    PERFIL_CH4_THERMO = np.array([
+        0.01, 0.02, 0.03, 0.05, 0.08, 0.12, 0.15, 0.18, 0.20, 0.18,
+        0.15, 0.12, 0.10, 0.08, 0.06, 0.05, 0.04, 0.03, 0.02, 0.02,
+        0.01, 0.01, 0.01, 0.01, 0.01, 0.005, 0.005, 0.005, 0.005, 0.005,
+        0.002, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001, 0.001, 0.001, 0.001,
+        0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001
     ])
+    PERFIL_CH4_THERMO /= PERFIL_CH4_THERMO.sum()
     
-    perfil_n2o = np.array([
-        0.10, 0.08, 0.15, 0.05, 0.03,  # Dias 1-5
-        0.04, 0.05, 0.07, 0.10, 0.12,  # Dias 6-10
-        0.15, 0.18, 0.20, 0.18, 0.15,  # Dias 11-15 (pico termofílico)
-        0.12, 0.10, 0.08, 0.06, 0.05,  # Dias 16-20
-        0.04, 0.03, 0.02, 0.02, 0.01,  # Dias 21-25
-        0.01, 0.01, 0.01, 0.01, 0.01,  # Dias 26-30
-        0.005, 0.005, 0.005, 0.005, 0.005,  # Dias 31-35
-        0.002, 0.002, 0.002, 0.002, 0.002,  # Dias 36-40
-        0.001, 0.001, 0.001, 0.001, 0.001,  # Dias 41-45
-        0.001, 0.001, 0.001, 0.001, 0.001,   # Dias 46-50
+    PERFIL_N2O_THERMO = np.array([
+        0.10, 0.08, 0.15, 0.05, 0.03, 0.04, 0.05, 0.07, 0.10, 0.12,
+        0.15, 0.18, 0.20, 0.18, 0.15, 0.12, 0.10, 0.08, 0.06, 0.05,
+        0.04, 0.03, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01,
+        0.005, 0.005, 0.005, 0.005, 0.005, 0.002, 0.002, 0.002, 0.002, 0.002,
+        0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001
     ])
+    PERFIL_N2O_THERMO /= PERFIL_N2O_THERMO.sum()
     
-    # Normalizar perfis
-    perfil_ch4 = perfil_ch4 / perfil_ch4.sum()
-    perfil_n2o = perfil_n2o / perfil_n2o.sum()
+    # Inicializar arrays
+    emissoes_CH4 = np.zeros(dias_simulacao)
+    emissoes_N2O = np.zeros(dias_simulacao)
     
-    # Convolução: entrada diária constante com os perfis
-    entradas_diarias = np.ones(dias, dtype=float)
-    emissoes_CH4 = fftconvolve(entradas_diarias, perfil_ch4, mode='full')[:dias]
-    emissoes_CH4 *= ch4_total_por_lote
+    # Convolução
+    for dia_entrada in range(dias_simulacao):
+        for dia_compostagem in range(len(PERFIL_CH4_THERMO)):
+            dia_emissao = dia_entrada + dia_compostagem
+            if dia_emissao < dias_simulacao:
+                emissoes_CH4[dia_emissao] += ch4_total_por_lote_diario * PERFIL_CH4_THERMO[dia_compostagem]
+                emissoes_N2O[dia_emissao] += n2o_total_por_lote_diario * PERFIL_N2O_THERMO[dia_compostagem]
     
-    emissoes_N2O = fftconvolve(entradas_diarias, perfil_n2o, mode='full')[:dias]
-    emissoes_N2O *= n2o_total_por_lote
-    
-    # Totais acumulados
-    total_ch4 = np.sum(emissoes_CH4)
-    total_n2o = np.sum(emissoes_N2O)
-    
-    return emissoes_CH4, emissoes_N2O, total_ch4, total_n2o
+    return emissoes_CH4, emissoes_N2O
 
 # =============================================================================
-# FUNÇÃO PARA SIMULAR OS TRÊS CENÁRIOS ECONÔMICOS
+# FUNÇÕES AUXILIARES
 # =============================================================================
 
-def simular_cenarios_financeiros(total_evitado_tco2eq, preco_carbono_eur, taxa_cambio):
-    """
-    Simula três cenários econômicos:
-    1. Otimista: Mercado regulado (preço atual do painel)
-    2. Base: Mercado voluntário (USD 7.48 ≈ R$ 37.40)
-    3. Pessimista: Sem venda de créditos
-    """
-    # Conversão de EUR para BRL
-    preco_carbono_brl = preco_carbono_eur * taxa_cambio
+def formatar_br(numero):
+    """Formata números no padrão brasileiro: 1.234,56"""
+    if pd.isna(numero):
+        return "N/A"
     
-    # Preço do mercado voluntário (USD 7.48 convertido para BRL)
-    taxa_usd_brl = 5.0  # Taxa estimada USD/BRL
-    preco_voluntario_usd = 7.48
-    preco_voluntario_brl = preco_voluntario_usd * taxa_usd_brl
+    numero = round(numero, 2)
+    return f"{numero:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def br_format(x, pos):
+    """Função de formatação para eixos de gráficos (padrão brasileiro)"""
+    if x == 0:
+        return "0"
     
-    # Cenários
-    cenarios = {
-        'Otimista (Mercado Regulado)': {
-            'preco': preco_carbono_brl,
-            'descricao': f'Preço atual: €{preco_carbono_eur:.2f} = R${preco_carbono_brl:.2f}/tCO₂eq',
-            'valor_total': total_evitado_tco2eq * preco_carbono_brl
-        },
-        'Base (Mercado Voluntário)': {
-            'preco': preco_voluntario_brl,
-            'descricao': f'Preço voluntário: USD {preco_voluntario_usd:.2f} = R${preco_voluntario_brl:.2f}/tCO₂eq',
-            'valor_total': total_evitado_tco2eq * preco_voluntario_brl
-        },
-        'Pessimista (Sem Créditos)': {
-            'preco': 0.0,
-            'descricao': 'Não consegue vender créditos de carbono',
-            'valor_total': 0.0
-        }
-    }
+    if abs(x) < 0.01:
+        return f"{x:.1e}".replace(".", ",")
     
-    return cenarios
+    if abs(x) >= 1000:
+        return f"{x:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
+    return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 # =============================================================================
 # INICIALIZAÇÃO DA SESSION STATE
@@ -525,11 +447,11 @@ def inicializar_session_state():
         st.session_state.moeda_real = "R$"
     if 'run_simulation' not in st.session_state:
         st.session_state.run_simulation = False
-    if 'run_continuous_simulation' not in st.session_state:
-        st.session_state.run_continuous_simulation = False
+    if 'run_simulacao_continuo' not in st.session_state:
+        st.session_state.run_simulacao_continuo = False
 
 # =============================================================================
-# FUNÇÃO PARA EXIBIR COTAÇÃO DO CARBONO NO PAINEL LATERAL
+# EXIBIR COTAÇÃO DO CARBONO NO PAINEL LATERAL
 # =============================================================================
 
 def exibir_cotacao_carbono():
@@ -579,65 +501,40 @@ def exibir_cotacao_carbono():
         """)
 
 # =============================================================================
-# FUNÇÃO PARA FORMATAR NÚMEROS NO PADRÃO BRASILEIRO
-# =============================================================================
-
-def formatar_br(numero):
-    """Formata números no padrão brasileiro: 1.234,56"""
-    if pd.isna(numero):
-        return "N/A"
-    
-    numero = round(numero, 2)
-    return f"{numero:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-def br_format(x, pos):
-    """Função de formatação para eixos de gráficos (padrão brasileiro)"""
-    if x == 0:
-        return "0"
-    
-    if abs(x) < 0.01:
-        return f"{x:.1e}".replace(".", ",")
-    
-    if abs(x) >= 1000:
-        return f"{x:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    
-    return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-# =============================================================================
 # CONFIGURAÇÃO PRINCIPAL DO APLICATIVO
 # =============================================================================
-
-# Título do aplicativo
-st.title("🔬 Estimação do Potencial de Metano - Lote de 100 kg")
-st.markdown("""
-**Análise Comparativa: Aterro vs Vermicompostagem vs Compostagem**
-
-Este simulador calcula o potencial de geração de metano de um lote de 100 kg de resíduos orgânicos
-em três diferentes cenários de gestão, com análise financeira baseada no mercado de carbono.
-""")
 
 # Inicializar session state
 inicializar_session_state()
 
-# =============================================================================
-# PAINEL LATERAL COM PARÂMETROS
-# =============================================================================
+# Título principal
+st.title("🔬 Estimação do Potencial de Emissões - Comparação Completa")
 
-# Exibir cotação do carbono
-exibir_cotacao_carbono()
+# Criar abas
+tab1, tab2 = st.tabs(["📦 Análise por Lote (100 kg)", "📈 Entrada Contínua (kg/dia)"])
 
-# Parâmetros de entrada
-with st.sidebar:
-    st.header("⚙️ Parâmetros de Entrada - Brasil")
+# =============================================================================
+# ABA 1: ANÁLISE POR LOTE (100 kg)
+# =============================================================================
+with tab1:
+    st.header("Análise por Lote Único de 100 kg")
+    st.markdown("""
+    **Análise Comparativa: Aterro vs Vermicompostagem vs Compostagem**
+
+    Este simulador calcula o potencial de geração de metano de um lote de 100 kg de resíduos orgânicos
+    em três diferentes cenários de gestão, com análise financeira baseada no mercado de carbono.
+    """)
     
-    # Seletor de tipo de simulação
-    tipo_simulacao = st.radio(
-        "Tipo de Simulação",
-        ["Lote Único", "Entrada Contínua (1 lote/dia por 20 anos)"],
-        help="Escolha entre analisar um lote único ou simular entrada contínua"
-    )
+    # Exibir cotação do carbono
+    exibir_cotacao_carbono()
     
-    if tipo_simulacao == "Lote Único":
+    # Parâmetros de entrada na sidebar (apenas para aba 1)
+    with st.sidebar:
+        if st.session_state.get('aba_atual') != 1:
+            st.session_state.aba_atual = 1
+            
+        st.header("⚙️ Parâmetros de Entrada - Lote Único")
+        
         # Entrada principal de resíduos (fixo em 100 kg para o lote)
         st.subheader("📦 Lote de Resíduos")
         residuos_kg = st.number_input(
@@ -646,7 +543,8 @@ with st.sidebar:
             max_value=1000, 
             value=100, 
             step=10,
-            help="Peso do lote de resíduos orgânicos para análise"
+            help="Peso do lote de resíduos orgânicos para análise",
+            key="lote_residuos"
         )
         
         st.subheader("📊 Parâmetros Ambientais")
@@ -654,762 +552,507 @@ with st.sidebar:
         umidade_valor = st.slider(
             "Umidade do resíduo (%)", 
             50, 95, 85, 1,
-            help="Percentual de umidade dos resíduos orgânicos"
+            help="Percentual de umidade dos resíduos orgânicos",
+            key="umidade_lote"
         )
         umidade = umidade_valor / 100.0
         
         temperatura = st.slider(
             "Temperatura média (°C)", 
             15, 35, 25, 1,
-            help="Temperatura média ambiente (importante para cálculo do DOCf)"
+            help="Temperatura média ambiente (importante para cálculo do DOCf)",
+            key="temp_lote"
         )
         
         st.subheader("⏰ Período de Análise")
         dias_simulacao = st.slider(
             "Dias de simulação", 
             50, 1000, 365, 50,
-            help="Período total da simulação em dias"
+            help="Período total da simulação em dias",
+            key="dias_lote"
         )
         
-        if st.button("🚀 Calcular Potencial de Metano (Lote Único)", type="primary"):
+        if st.button("🚀 Calcular Potencial de Metano", type="primary", key="btn_lote"):
             st.session_state.run_simulation = True
-            st.session_state.run_continuous_simulation = False
+
+    # Execução da simulação para aba 1
+    if st.session_state.get('run_simulation', False):
+        with st.spinner('Calculando potencial de metano para os três cenários...'):
             
-    else:  # Entrada Contínua
-        st.subheader("📦 Sistema de Entrada Contínua")
+            # 1. CÁLCULO DO POTENCIAL DE METANO PARA CADA CENÁRIO
+            # Aterro Sanitário
+            emissoes_aterro, total_aterro, DOCf = calcular_potencial_metano_aterro(
+                residuos_kg, umidade, temperatura, dias_simulacao
+            )
+            
+            # Vermicompostagem (50 dias de processo)
+            dias_vermi = min(50, dias_simulacao)
+            emissoes_vermi_temp, total_vermi = calcular_emissoes_vermicompostagem(
+                residuos_kg, umidade, dias_vermi
+            )
+            emissoes_vermi = np.zeros(dias_simulacao)
+            emissoes_vermi[:dias_vermi] = emissoes_vermi_temp
+            
+            # Compostagem Termofílica (50 dias de processo)
+            dias_compost = min(50, dias_simulacao)
+            emissoes_compost_temp, total_compost = calcular_emissoes_compostagem(
+                residuos_kg, umidade, dias_compost
+            )
+            emissoes_compost = np.zeros(dias_simulacao)
+            emissoes_compost[:dias_compost] = emissoes_compost_temp
+            
+            # 2. CRIAR DATAFRAME COM OS RESULTADOS
+            datas = pd.date_range(start=datetime.now(), periods=dias_simulacao, freq='D')
+            
+            df = pd.DataFrame({
+                'Data': datas,
+                'Aterro_CH4_kg': emissoes_aterro,
+                'Vermicompostagem_CH4_kg': emissoes_vermi,
+                'Compostagem_CH4_kg': emissoes_compost
+            })
+            
+            # Calcular valores acumulados
+            df['Aterro_Acumulado'] = df['Aterro_CH4_kg'].cumsum()
+            df['Vermi_Acumulado'] = df['Vermicompostagem_CH4_kg'].cumsum()
+            df['Compost_Acumulado'] = df['Compostagem_CH4_kg'].cumsum()
+            
+            # Calcular reduções (evitadas) em relação ao aterro
+            df['Reducao_Vermi'] = df['Aterro_Acumulado'] - df['Vermi_Acumulado']
+            df['Reducao_Compost'] = df['Aterro_Acumulado'] - df['Compost_Acumulado']
+            
+            # 3. EXIBIR RESULTADOS PRINCIPAIS
+            st.header("📊 Resultados - Potencial de Metano por Cenário")
+            
+            # Métricas principais
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric(
+                    "Aterro Sanitário",
+                    f"{formatar_br(total_aterro)} kg CH₄",
+                    help=f"Total em {dias_simulacao} dias"
+                )
+            
+            with col2:
+                reducao_vermi_kg = total_aterro - total_vermi
+                reducao_vermi_perc = (1 - total_vermi/total_aterro)*100 if total_aterro > 0 else 0
+                st.metric(
+                    "Vermicompostagem",
+                    f"{formatar_br(total_vermi)} kg CH₄",
+                    delta=f"-{formatar_br(reducao_vermi_perc)}%",
+                    delta_color="inverse",
+                    help=f"Redução de {formatar_br(reducao_vermi_kg)} kg vs aterro"
+                )
+            
+            with col3:
+                reducao_compost_kg = total_aterro - total_compost
+                reducao_compost_perc = (1 - total_compost/total_aterro)*100 if total_aterro > 0 else 0
+                st.metric(
+                    "Compostagem Termofílica",
+                    f"{formatar_br(total_compost)} kg CH₄",
+                    delta=f"-{formatar_br(reducao_compost_perc)}%",
+                    delta_color="inverse",
+                    help=f"Redução de {formatar_br(reducao_compost_kg)} kg vs aterro"
+                )
+            
+            # 4. GRÁFICO: REDUÇÃO DE EMISSÕES ACUMULADA
+            st.subheader("📉 Redução de Emissões Acumulada (CH₄)")
+            
+            fig, ax = plt.subplots(figsize=(12, 6))
+            
+            # Configurar formatação
+            br_formatter = FuncFormatter(br_format)
+            
+            # Plotar linhas de acumulado
+            ax.plot(df['Data'], df['Aterro_Acumulado'], 'r-', 
+                    label='Aterro Sanitário', linewidth=3, alpha=0.7)
+            ax.plot(df['Data'], df['Vermi_Acumulado'], 'g-', 
+                    label='Vermicompostagem', linewidth=2)
+            ax.plot(df['Data'], df['Compost_Acumulado'], 'b-', 
+                    label='Compostagem Termofílica', linewidth=2)
+            
+            # Área de redução (evitadas)
+            ax.fill_between(df['Data'], df['Vermi_Acumulado'], df['Aterro_Acumulado'],
+                            color='green', alpha=0.3, label='Redução Vermicompostagem')
+            ax.fill_between(df['Data'], df['Compost_Acumulado'], df['Aterro_Acumulado'],
+                            color='blue', alpha=0.2, label='Redução Compostagem')
+            
+            # Configurar gráfico
+            ax.set_title(f'Acumulado de Metano em {dias_simulacao} Dias - Lote de {residuos_kg} kg', 
+                        fontsize=14, fontweight='bold')
+            ax.set_xlabel('Data')
+            ax.set_ylabel('Metano Acumulado (kg CH₄)')
+            ax.legend(title='Cenário de Gestão', loc='upper left')
+            ax.grid(True, linestyle='--', alpha=0.5)
+            ax.yaxis.set_major_formatter(br_formatter)
+            
+            # Rotacionar labels do eixo x
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            
+            st.pyplot(fig)
+            
+            # 5. GRÁFICO: EMISSÕES DIÁRIAS COMPARATIVAS
+            st.subheader("📈 Emissões Diárias de Metano")
+            
+            fig, ax = plt.subplots(figsize=(12, 6))
+            
+            # Plotar emissões diárias (apenas primeiros 100 dias para melhor visualização)
+            dias_exibir = min(100, dias_simulacao)
+            
+            # Criar gráfico com barras para visualizar melhor as diferenças
+            x_pos = np.arange(dias_exibir)
+            bar_width = 0.25
+            
+            # Usar barras para visualização mais clara
+            ax.bar(x_pos - bar_width, df['Aterro_CH4_kg'][:dias_exibir], bar_width, 
+                    label='Aterro', color='red', alpha=0.7)
+            ax.bar(x_pos, df['Vermicompostagem_CH4_kg'][:dias_exibir], bar_width, 
+                    label='Vermicompostagem', color='green', alpha=0.7)
+            ax.bar(x_pos + bar_width, df['Compostagem_CH4_kg'][:dias_exibir], bar_width, 
+                    label='Compostagem', color='blue', alpha=0.7)
+            
+            ax.set_xlabel('Dias')
+            ax.set_ylabel('Metano (kg CH₄/dia)')
+            ax.set_title(f'Emissões Diárias de Metano (Primeiros {dias_exibir} Dias)', 
+                        fontsize=14, fontweight='bold')
+            ax.legend(title='Cenário')
+            ax.grid(True, linestyle='--', alpha=0.5, axis='y')
+            ax.yaxis.set_major_formatter(br_formatter)
+            
+            # Ajustar ticks do eixo x
+            ax.set_xticks(x_pos[::10])
+            ax.set_xticklabels([f'Dia {i+1}' for i in x_pos[::10]])
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            
+            # 6. CÁLCULO DE CO₂eq E VALOR FINANCEIRO
+            st.header("💰 Valor Financeiro das Emissões Evitadas")
+            
+            # Converter metano para CO₂eq (GWP CH₄ = 27.9 para 100 anos - IPCC AR6)
+            GWP_CH4 = 27.9  # kg CO₂eq por kg CH₄
+            
+            total_evitado_vermi_kg = (total_aterro - total_vermi) * GWP_CH4
+            total_evitado_vermi_tco2eq = total_evitado_vermi_kg / 1000
+            
+            total_evitado_compost_kg = (total_aterro - total_compost) * GWP_CH4
+            total_evitado_compost_tco2eq = total_evitado_compost_kg / 1000
+            
+            # Calcular valor em Reais
+            preco_carbono_reais = st.session_state.preco_carbono * st.session_state.taxa_cambio
+            
+            valor_vermi_brl = total_evitado_vermi_tco2eq * preco_carbono_reais
+            valor_compost_brl = total_evitado_compost_tco2eq * preco_carbono_reais
+            
+            # Exibir métricas
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.metric(
+                    "Vermicompostagem",
+                    f"{formatar_br(total_evitado_vermi_tco2eq)} tCO₂eq",
+                    f"R$ {formatar_br(valor_vermi_brl)}",
+                    delta_color="off"
+                )
+            
+            with col2:
+                st.metric(
+                    "Compostagem",
+                    f"{formatar_br(total_evitado_compost_tco2eq)} tCO₂eq",
+                    f"R$ {formatar_br(valor_compost_brl)}",
+                    delta_color="off"
+                )
+
+# =============================================================================
+# ABA 2: ENTRADA CONTÍNUA (kg/dia)
+# =============================================================================
+with tab2:
+    st.header("Análise para Entrada Contínua (kg/dia)")
+    st.markdown("""
+    **Análise Comparativa Completa: CH₄ + N₂O com GWP de 20 anos**
+    
+    Este simulador calcula as emissões totais (metano + óxido nitroso) para operação contínua,
+    utilizando a mesma metodologia do Script 2 para comparação direta.
+    """)
+    
+    # Configurar sidebar para aba 2
+    with st.sidebar:
+        # Limpar flags da aba 1
+        if st.session_state.get('aba_atual') != 2:
+            st.session_state.aba_atual = 2
+            st.session_state.run_simulation = False
         
+        st.header("⚙️ Parâmetros Entrada Contínua")
+        
+        # Entrada principal em kg/dia
         residuos_kg_dia = st.number_input(
-            "Peso do lote diário (kg/dia)", 
+            "Resíduos orgânicos (kg/dia)", 
             min_value=10, 
-            max_value=1000, 
+            max_value=5000, 
             value=100, 
             step=10,
-            help="Peso de cada lote diário de resíduos orgânicos"
+            help="Quantidade diária de resíduos para processamento contínuo",
+            key="continuo_residuos"
         )
         
         st.subheader("📊 Parâmetros Ambientais")
         
-        umidade_valor = st.slider(
-            "Umidade do resíduo (%)", 
+        umidade_valor_cont = st.slider(
+            "Umidade do resíduo (%) - Contínuo", 
             50, 95, 85, 1,
-            help="Percentual de umidade dos resíduos orgânicos"
+            help="Percentual de umidade dos resíduos orgânicos",
+            key="umidade_cont"
         )
-        umidade = umidade_valor / 100.0
+        umidade_cont = umidade_valor_cont / 100.0
         
-        temperatura = st.slider(
-            "Temperatura média (°C)", 
+        temperatura_cont = st.slider(
+            "Temperatura média (°C) - Contínuo", 
             15, 35, 25, 1,
-            help="Temperatura média ambiente (importante para cálculo do DOCf)"
+            help="Temperatura média ambiente",
+            key="temp_cont"
+        )
+        
+        # DOC (Carbono Orgânico Degradável)
+        doc_val = st.slider(
+            "DOC - Carbono Orgânico Degradável (fração)", 
+            0.10, 0.50, 0.15, 0.01,
+            help="Fração de carbono orgânico degradável nos resíduos",
+            key="doc_cont"
+        )
+        
+        st.subheader("🏭 Parâmetros Operacionais do Aterro")
+        
+        massa_exposta_kg = st.slider(
+            "Massa exposta na frente de trabalho (kg)", 
+            50, 500, 100, 10,
+            help="Massa de resíduos exposta diariamente no aterro",
+            key="massa_exposta"
+        )
+        
+        h_exposta = st.slider(
+            "Horas expostas por dia", 
+            4, 24, 8, 1,
+            help="Horas diárias de exposição dos resíduos no aterro",
+            key="horas_expostas"
         )
         
         st.subheader("⏰ Período de Análise")
-        anos_simulacao = st.slider(
-            "Anos de simulação", 
-            5, 50, 20, 5,
-            help="Período total da simulação em anos"
+        anos_simulacao_cont = st.slider(
+            "Anos de simulação - Contínuo", 
+            1, 50, 20, 1,
+            help="Período total da simulação em anos",
+            key="anos_cont"
         )
         
-        if st.button("🚀 Simular Entrada Contínua (20 anos)", type="primary"):
-            st.session_state.run_continuous_simulation = True
-            st.session_state.run_simulation = False
+        dias_simulacao_cont = anos_simulacao_cont * 365
+        
+        if st.button("🚀 Calcular Emissões Contínuas", type="primary", key="btn_continuo"):
+            st.session_state.run_simulacao_continuo = True
 
-# =============================================================================
-# EXECUÇÃO DA SIMULAÇÃO PARA LOTE ÚNICO (ORIGINAL)
-# =============================================================================
-
-if st.session_state.get('run_simulation', False) and tipo_simulacao == "Lote Único":
-    with st.spinner('Calculando potencial de metano para os três cenários...'):
-        
-        # =====================================================================
-        # 1. CÁLCULO DO POTENCIAL DE METANO PARA CADA CENÁRIO
-        # =====================================================================
-        
-        # Aterro Sanitário
-        emissoes_aterro_CH4, emissoes_aterro_N2O, total_aterro, DOCf = calcular_potencial_metano_aterro(
-            residuos_kg, umidade, temperatura, dias_simulacao
-        )
-        
-        # Vermicompostagem (50 dias de processo)
-        dias_vermi = min(50, dias_simulacao)
-        emissoes_vermi_CH4_temp, emissoes_vermi_N2O_temp, total_vermi_CH4, total_vermi_N2O = calcular_emissoes_vermicompostagem(
-            residuos_kg, umidade, dias_vermi
-        )
-        emissoes_vermi_CH4 = np.zeros(dias_simulacao)
-        emissoes_vermi_N2O = np.zeros(dias_simulacao)
-        emissoes_vermi_CH4[:dias_vermi] = emissoes_vermi_CH4_temp
-        emissoes_vermi_N2O[:dias_vermi] = emissoes_vermi_N2O_temp
-        
-        total_vermi = total_vermi_CH4 + total_vermi_N2O
-        
-        # Compostagem Termofílica (50 dias de processo)
-        dias_compost = min(50, dias_simulacao)
-        emissoes_compost_CH4_temp, emissoes_compost_N2O_temp, total_compost_CH4, total_compost_N2O = calcular_emissoes_compostagem(
-            residuos_kg, umidade, dias_compost
-        )
-        emissoes_compost_CH4 = np.zeros(dias_simulacao)
-        emissoes_compost_N2O = np.zeros(dias_simulacao)
-        emissoes_compost_CH4[:dias_compost] = emissoes_compost_CH4_temp
-        emissoes_compost_N2O[:dias_compost] = emissoes_compost_N2O_temp
-        
-        total_compost = total_compost_CH4 + total_compost_N2O
-        
-        # =====================================================================
-        # 2. CRIAR DATAFRAME COM OS RESULTADOS
-        # =====================================================================
-        
-        datas = pd.date_range(start=datetime.now(), periods=dias_simulacao, freq='D')
-        
-        df = pd.DataFrame({
-            'Data': datas,
-            'Aterro_CH4_kg': emissoes_aterro_CH4,
-            'Aterro_N2O_kg': emissoes_aterro_N2O,
-            'Vermicompostagem_CH4_kg': emissoes_vermi_CH4,
-            'Vermicompostagem_N2O_kg': emissoes_vermi_N2O,
-            'Compostagem_CH4_kg': emissoes_compost_CH4,
-            'Compostagem_N2O_kg': emissoes_compost_N2O
-        })
-        
-        # Calcular valores acumulados
-        df['Aterro_Acumulado'] = df['Aterro_CH4_kg'].cumsum() + df['Aterro_N2O_kg'].cumsum()
-        df['Vermi_Acumulado'] = df['Vermicompostagem_CH4_kg'].cumsum() + df['Vermicompostagem_N2O_kg'].cumsum()
-        df['Compost_Acumulado'] = df['Compostagem_CH4_kg'].cumsum() + df['Compostagem_N2O_kg'].cumsum()
-        
-        # Calcular reduções (evitadas) em relação ao aterro
-        df['Reducao_Vermi'] = df['Aterro_Acumulado'] - df['Vermi_Acumulado']
-        df['Reducao_Compost'] = df['Aterro_Acumulado'] - df['Compost_Acumulado']
-        
-        # =====================================================================
-        # 3. EXIBIR RESULTADOS PRINCIPAIS
-        # =====================================================================
-        
-        st.header("📊 Resultados - Potencial de Metano por Cenário")
-        
-        # Métricas principais
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric(
-                "Aterro Sanitário",
-                f"{formatar_br(total_aterro)} kg GEE",
-                help=f"Total em {dias_simulacao} dias (CH₄ + N₂O)"
-            )
-        
-        with col2:
-            reducao_vermi_kg = total_aterro - total_vermi
-            reducao_vermi_perc = (1 - total_vermi/total_aterro)*100 if total_aterro > 0 else 0
-            st.metric(
-                "Vermicompostagem",
-                f"{formatar_br(total_vermi)} kg GEE",
-                delta=f"-{formatar_br(reducao_vermi_perc)}%",
-                delta_color="inverse",
-                help=f"Redução de {formatar_br(reducao_vermi_kg)} kg vs aterro"
-            )
-        
-        with col3:
-            reducao_compost_kg = total_aterro - total_compost
-            reducao_compost_perc = (1 - total_compost/total_aterro)*100 if total_aterro > 0 else 0
-            st.metric(
-                "Compostagem Termofílica",
-                f"{formatar_br(total_compost)} kg GEE",
-                delta=f"-{formatar_br(reducao_compost_perc)}%",
-                delta_color="inverse",
-                help=f"Redução de {formatar_br(reducao_compost_kg)} kg vs aterro"
-            )
-        
-        # Exibir parâmetros intermediários de cálculo
-        with st.expander("🧮 Detalhes dos Cálculos Intermediários", expanded=False):
-            st.markdown(f"""
-            **Parâmetros Intermediários para Aterro:**
-            - **DOC (Carbono Orgânico Degradável):** 0.15 (fração)
-            - **DOCf (fração degradável):** {DOCf:.4f} (calculado: 0.0147 × {temperatura}°C + 0.28)
-            - **MCF (Fator de Correção de Metano):** 1.0
-            - **F (Fração de Metano no Biogás):** 0.5
-            - **OX (Fator de Oxidação):** 0.1
-            - **Ri (Metano Recuperado):** 0.0
-            - **E_medio N2O:** 2.15 g N₂O-N/ton MSW (Wang et al. 2017)
+    # Execução da simulação para aba 2
+    if st.session_state.get('run_simulacao_continuo', False):
+        with st.spinner(f'Calculando emissões para {residuos_kg_dia} kg/dia durante {anos_simulacao_cont} anos...'):
             
-            **Parâmetros para Vermicompostagem:**
-            - **TOC (Carbono Orgânico Total):** 0.436
-            - **TN (Nitrogênio Total):** 0.0142
-            - **CH₄_C_FRAC (Fração emitida):** 0.13%
-            - **N₂O_N_FRAC (Fração emitida):** 0.92%
-            - **Matéria Seca:** {formatar_br((1-umidade)*100)}%
+            # 1. CÁLCULO DAS EMISSÕES COMPLETAS
+            # Aterro
+            ch4_aterro, n2o_aterro, DOCf = calcular_emissoes_aterro_completo_continuo(
+                residuos_kg_dia, umidade_cont, temperatura_cont, doc_val,
+                massa_exposta_kg, h_exposta, dias_simulacao_cont
+            )
             
-            **Parâmetros para Compostagem:**
-            - **TOC (Carbono Orgânico Total):** 0.436
-            - **TN (Nitrogênio Total):** 0.0142
-            - **CH₄_C_FRAC (Fração emitida):** 0.6%
-            - **N₂O_N_FRAC (Fração emitida):** 1.96%
-            - **Matéria Seca:** {formatar_br((1-umidade)*100)}%
-            """)
-        
-        # =====================================================================
-        # 4. GRÁFICO: REDUÇÃO DE EMISSÕES ACUMULADA
-        # =====================================================================
-        
-        st.subheader("📉 Redução de Emissões Acumulada (GEE)")
-        
-        fig, ax = plt.subplots(figsize=(12, 6))
-        
-        # Configurar formatação
-        br_formatter = FuncFormatter(br_format)
-        
-        # Plotar linhas de acumulado
-        ax.plot(df['Data'], df['Aterro_Acumulado'], 'r-', 
-                label='Aterro Sanitário', linewidth=3, alpha=0.7)
-        ax.plot(df['Data'], df['Vermi_Acumulado'], 'g-', 
-                label='Vermicompostagem', linewidth=2)
-        ax.plot(df['Data'], df['Compost_Acumulado'], 'b-', 
-                label='Compostagem Termofílica', linewidth=2)
-        
-        # Área de redução (evitadas)
-        ax.fill_between(df['Data'], df['Vermi_Acumulado'], df['Aterro_Acumulado'],
-                        color='green', alpha=0.3, label='Redução Vermicompostagem')
-        ax.fill_between(df['Data'], df['Compost_Acumulado'], df['Aterro_Acumulado'],
-                        color='blue', alpha=0.2, label='Redução Compostagem')
-        
-        # Configurar gráfico
-        ax.set_title(f'Acumulado de GEE em {dias_simulacao} Dias - Lote de {residuos_kg} kg', 
-                    fontsize=14, fontweight='bold')
-        ax.set_xlabel('Data')
-        ax.set_ylabel('GEE Acumulado (kg CH₄ + N₂O)')
-        ax.legend(title='Cenário de Gestão', loc='upper left')
-        ax.grid(True, linestyle='--', alpha=0.5)
-        ax.yaxis.set_major_formatter(br_formatter)
-        
-        # Rotacionar labels do eixo x
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        
-        st.pyplot(fig)
-        
-        # =====================================================================
-        # 5. GRÁFICO: EMISSÕES DIÁRIAS COMPARATIVAS
-        # =====================================================================
-        
-        st.subheader("📈 Emissões Diárias de GEE")
-        
-        fig, ax = plt.subplots(figsize=(12, 6))
-        
-        # Plotar emissões diárias (apenas primeiros 100 dias para melhor visualização)
-        dias_exibir = min(100, dias_simulacao)
-        
-        # Calcular emissões totais diárias
-        df['Aterro_Total_dia'] = df['Aterro_CH4_kg'] + df['Aterro_N2O_kg']
-        df['Vermi_Total_dia'] = df['Vermicompostagem_CH4_kg'] + df['Vermicompostagem_N2O_kg']
-        df['Compost_Total_dia'] = df['Compostagem_CH4_kg'] + df['Compostagem_N2O_kg']
-        
-        # Criar gráfico com barras para visualizar melhor as diferenças
-        x_pos = np.arange(dias_exibir)
-        bar_width = 0.25
-        
-        # Usar barras para visualização mais clara
-        ax.bar(x_pos - bar_width, df['Aterro_Total_dia'][:dias_exibir], bar_width, 
-                label='Aterro', color='red', alpha=0.7)
-        ax.bar(x_pos, df['Vermi_Total_dia'][:dias_exibir], bar_width, 
-                label='Vermicompostagem', color='green', alpha=0.7)
-        ax.bar(x_pos + bar_width, df['Compost_Total_dia'][:dias_exibir], bar_width, 
-                label='Compostagem', color='blue', alpha=0.7)
-        
-        ax.set_xlabel('Dias')
-        ax.set_ylabel('GEE (kg CH₄ + N₂O/dia)')
-        ax.set_title(f'Emissões Diárias de GEE (Primeiros {dias_exibir} Dias)', 
-                    fontsize=14, fontweight='bold')
-        ax.legend(title='Cenário')
-        ax.grid(True, linestyle='--', alpha=0.5, axis='y')
-        ax.yaxis.set_major_formatter(br_formatter)
-        
-        # Ajustar ticks do eixo x
-        ax.set_xticks(x_pos[::10])
-        ax.set_xticklabels([f'Dia {i+1}' for i in x_pos[::10]])
-        
-        plt.tight_layout()
-        st.pyplot(fig)
-        
-        # =====================================================================
-        # 6. SIMULAÇÃO DOS TRÊS CENÁRIOS FINANCEIROS
-        # =====================================================================
-        
-        st.header("💰 Simulação de Cenários Financeiros - Mercado de Carbono")
-        
-        # Converter GEE para CO₂eq
-        GWP_CH4 = 27.9  # kg CO₂eq por kg CH₄ (IPCC AR6)
-        GWP_N2O = 273   # kg CO₂eq por kg N₂O (IPCC AR6)
-        
-        # Calcular emissões evitadas em tCO₂eq
-        total_evitado_vermi_tco2eq = (
-            (total_aterro - total_vermi) * 
-            ((total_aterro_CH4/total_aterro * GWP_CH4) + (total_aterro_N2O/total_aterro * GWP_N2O)) / 1000
-        )
-        
-        total_evitado_compost_tco2eq = (
-            (total_aterro - total_compost) * 
-            ((total_aterro_CH4/total_aterro * GWP_CH4) + (total_aterro_N2O/total_aterro * GWP_N2O)) / 1000
-        )
-        
-        # Para simplificar, vamos usar uma média ponderada
-        # Assumindo que o aterro tem aproximadamente 90% CH4 e 10% N2O em termos de CO2eq
-        total_evitado_vermi_tco2eq_simplificado = (total_aterro - total_vermi) * 30 / 1000  # Média ponderada
-        total_evitado_compost_tco2eq_simplificado = (total_aterro - total_compost) * 30 / 1000
-        
-        # Simular cenários financeiros
-        cenarios_vermi = simular_cenarios_financeiros(
-            total_evitado_vermi_tco2eq_simplificado, 
-            st.session_state.preco_carbono,
-            st.session_state.taxa_cambio
-        )
-        
-        cenarios_compost = simular_cenarios_financeiros(
-            total_evitado_compost_tco2eq_simplificado,
-            st.session_state.preco_carbono,
-            st.session_state.taxa_cambio
-        )
-        
-        # Exibir métricas de CO₂eq
-        st.subheader("🌍 Impacto em CO₂eq (Potencial de Aquecimento Global)")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.metric(
-                "Vermicompostagem",
-                f"{formatar_br(total_evitado_vermi_tco2eq_simplificado)} tCO₂eq",
-                help=f"Equivalente a {formatar_br(total_evitado_vermi_tco2eq_simplificado * 1000)} kg CO₂eq"
+            # Vermicompostagem
+            ch4_vermi, n2o_vermi = calcular_emissoes_vermi_completo_continuo(
+                residuos_kg_dia, umidade_cont, dias_simulacao_cont
             )
-        
-        with col2:
-            st.metric(
-                "Compostagem",
-                f"{formatar_br(total_evitado_compost_tco2eq_simplificado)} tCO₂eq",
-                help=f"Equivalente a {formatar_br(total_evitado_compost_tco2eq_simplificado * 1000)} kg CO₂eq"
+            
+            # Compostagem
+            ch4_compost, n2o_compost = calcular_emissoes_compostagem_completo_continuo(
+                residuos_kg_dia, umidade_cont, dias_simulacao_cont
             )
-        
-        # Calcular e mostrar a diferença percentual
-        diferenca_percentual = ((total_evitado_vermi_tco2eq_simplificado - total_evitado_compost_tco2eq_simplificado) / total_evitado_compost_tco2eq_simplificado * 100) if total_evitado_compost_tco2eq_simplificado > 0 else 0
-        
-        st.caption(f"📊 **Diferença:** A vermicompostagem evita {diferenca_percentual:+.2f}% mais emissões que a compostagem termofílica")
-        
-        # Exibir tabela comparativa
-        st.subheader("📊 Comparação de Cenários Financeiros")
-        
-        dados_comparativos = []
-        for cenario in ['Otimista (Mercado Regulado)', 'Base (Mercado Voluntário)', 'Pessimista (Sem Créditos)']:
-            dados_comparativos.append({
-                'Cenário': cenario,
-                'Descrição': cenarios_vermi[cenario]['descricao'],
-                'Vermicompostagem (R$)': formatar_br(cenarios_vermi[cenario]['valor_total']),
-                'Compostagem (R$)': formatar_br(cenarios_compost[cenario]['valor_total']),
-                'Diferença (R$)': formatar_br(cenarios_vermi[cenario]['valor_total'] - cenarios_compost[cenario]['valor_total'])
+            
+            # 2. CRIAR DATAFRAME COM RESULTADOS
+            datas = pd.date_range(start=datetime.now(), periods=dias_simulacao_cont, freq='D')
+            
+            df_continuo = pd.DataFrame({
+                'Data': datas,
+                'CH4_Aterro_kg_dia': ch4_aterro,
+                'N2O_Aterro_kg_dia': n2o_aterro,
+                'CH4_Vermi_kg_dia': ch4_vermi,
+                'N2O_Vermi_kg_dia': n2o_vermi,
+                'CH4_Compost_kg_dia': ch4_compost,
+                'N2O_Compost_kg_dia': n2o_compost
             })
-        
-        df_comparativo = pd.DataFrame(dados_comparativos)
-        st.dataframe(df_comparativo, use_container_width=True)
-        
-        # =====================================================================
-        # 7. RESUMO DETALHADO
-        # =====================================================================
-        
-        with st.expander("📋 Resumo Detalhado da Análise", expanded=False):
-            st.markdown(f"""
-            ### **Resumo da Análise - Lote de {residuos_kg} kg**
             
-            **Parâmetros Utilizados:**
-            - Umidade: {umidade_valor}% ({formatar_br(umidade)} fração)
-            - Temperatura: {temperatura}°C
-            - Período: {dias_simulacao} dias
-            - GWP CH₄ (IPCC AR6): 27.9 kg CO₂eq/kg CH₄
-            - GWP N₂O (IPCC AR6): 273 kg CO₂eq/kg N₂O
+            # 3. CONVERTER PARA CO₂eq (GWP 20 anos - igual Script 2)
+            GWP_CH4_20 = 79.7  # IPCC AR6 - 20 anos
+            GWP_N2O_20 = 273   # IPCC AR6 - 20 anos
             
-            **Resultados de GEE (CH₄ + N₂O):**
-            - **Aterro Sanitário:** {formatar_br(total_aterro)} kg GEE
-            - **Vermicompostagem:** {formatar_br(total_vermi)} kg GEE
-            - **Compostagem Termofílica:** {formatar_br(total_compost)} kg GEE
+            # Cálculo diário de tCO₂eq
+            for gas, gwp in [('CH4', GWP_CH4_20), ('N2O', GWP_N2O_20)]:
+                for cenario in ['Aterro', 'Vermi', 'Compost']:
+                    col_kg = f'{gas}_{cenario}_kg_dia'
+                    col_tco2eq = f'{gas}_{cenario}_tCO2eq_dia'
+                    df_continuo[col_tco2eq] = df_continuo[col_kg] * gwp / 1000
             
-            **Reduções em Relação ao Aterro:**
-            - **Vermicompostagem:** {formatar_br(total_aterro - total_vermi)} kg GEE ({formatar_br(reducao_vermi_perc)}%)
-            - **Compostagem:** {formatar_br(total_aterro - total_compost)} kg GEE ({formatar_br(reducao_compost_perc)}%)
-            
-            **Em CO₂eq Evitadas:**
-            - **Vermicompostagem:** {formatar_br(total_evitado_vermi_tco2eq_simplificado)} tCO₂eq
-            - **Compostagem:** {formatar_br(total_evitado_compost_tco2eq_simplificado)} tCO₂eq
-            - **Diferença:** {diferenca_percentual:+.2f}%
-            
-            **💡 Conclusão:**
-            A vermicompostagem apresenta maior potencial de redução de emissões de GEE 
-            ({formatar_br(reducao_vermi_perc)}% vs {formatar_br(reducao_compost_perc)}% da compostagem),
-            resultando em maior valor financeiro potencial no mercado de carbono.
-            
-            **⚖️ Viabilidade Financeira:**
-            - **Mercado Regulado:** Projeto altamente viável para ambas tecnologias
-            - **Mercado Voluntário:** Viabilidade moderada, depende de outros benefícios
-            - **Sem Créditos:** Necessidade de subsídios ou outras fontes de receita
-            """)
-
-# =============================================================================
-# EXECUÇÃO DA SIMULAÇÃO PARA ENTRADA CONTÍNUA (NOVA FUNCIONALIDADE)
-# =============================================================================
-
-elif st.session_state.get('run_continuous_simulation', False) and tipo_simulacao == "Entrada Contínua (1 lote/dia por 20 anos)":
-    with st.spinner('Calculando emissões de GEE para entrada contínua de 1 lote por dia durante 20 anos...'):
-        
-        # =====================================================================
-        # 1. CÁLCULO DAS EMISSÕES PARA ENTRADA CONTÍNUA
-        # =====================================================================
-        
-        # Aterro Sanitário - entrada contínua
-        emissoes_aterro_CH4, emissoes_aterro_N2O, total_aterro_CH4, total_aterro_N2O, DOCf = calcular_emissoes_aterro_continuo(
-            residuos_kg_dia, umidade, temperatura, anos_simulacao
-        )
-        total_aterro = total_aterro_CH4 + total_aterro_N2O
-        
-        # Vermicompostagem - entrada contínua
-        emissoes_vermi_CH4, emissoes_vermi_N2O, total_vermi_CH4, total_vermi_N2O = calcular_emissoes_vermicompostagem_continuo(
-            residuos_kg_dia, umidade, anos_simulacao
-        )
-        total_vermi = total_vermi_CH4 + total_vermi_N2O
-        
-        # Compostagem Termofílica - entrada contínua
-        emissoes_compost_CH4, emissoes_compost_N2O, total_compost_CH4, total_compost_N2O = calcular_emissoes_compostagem_continuo(
-            residuos_kg_dia, umidade, anos_simulacao
-        )
-        total_compost = total_compost_CH4 + total_compost_N2O
-        
-        # =====================================================================
-        # 2. CRIAR DATAFRAME COM OS RESULTADOS
-        # =====================================================================
-        
-        dias_total = anos_simulacao * 365
-        datas = pd.date_range(start=datetime.now(), periods=dias_total, freq='D')
-        
-        df_cont = pd.DataFrame({
-            'Data': datas,
-            'Aterro_CH4_kg_dia': emissoes_aterro_CH4,
-            'Aterro_N2O_kg_dia': emissoes_aterro_N2O,
-            'Vermicompostagem_CH4_kg_dia': emissoes_vermi_CH4,
-            'Vermicompostagem_N2O_kg_dia': emissoes_vermi_N2O,
-            'Compostagem_CH4_kg_dia': emissoes_compost_CH4,
-            'Compostagem_N2O_kg_dia': emissoes_compost_N2O
-        })
-        
-        # Calcular valores acumulados
-        df_cont['Aterro_Total_dia'] = df_cont['Aterro_CH4_kg_dia'] + df_cont['Aterro_N2O_kg_dia']
-        df_cont['Vermi_Total_dia'] = df_cont['Vermicompostagem_CH4_kg_dia'] + df_cont['Vermicompostagem_N2O_kg_dia']
-        df_cont['Compost_Total_dia'] = df_cont['Compostagem_CH4_kg_dia'] + df_cont['Compostagem_N2O_kg_dia']
-        
-        df_cont['Aterro_Acumulado'] = df_cont['Aterro_Total_dia'].cumsum()
-        df_cont['Vermi_Acumulado'] = df_cont['Vermi_Total_dia'].cumsum()
-        df_cont['Compost_Acumulado'] = df_cont['Compost_Total_dia'].cumsum()
-        
-        # Calcular reduções (evitadas) em relação ao aterro
-        df_cont['Reducao_Vermi'] = df_cont['Aterro_Acumulado'] - df_cont['Vermi_Acumulado']
-        df_cont['Reducao_Compost'] = df_cont['Aterro_Acumulado'] - df_cont['Compost_Acumulado']
-        
-        # Agrupar por ano para análise anual
-        df_cont['Ano'] = df_cont['Data'].dt.year
-        df_anual = df_cont.groupby('Ano').agg({
-            'Aterro_Total_dia': 'sum',
-            'Vermi_Total_dia': 'sum',
-            'Compost_Total_dia': 'sum',
-            'Reducao_Vermi': 'last',
-            'Reducao_Compost': 'last'
-        }).reset_index()
-        
-        # =====================================================================
-        # 3. EXIBIR RESULTADOS PRINCIPAIS - ENTRADA CONTÍNUA
-        # =====================================================================
-        
-        st.header(f"📊 Resultados - Entrada Contínua ({anos_simulacao} anos)")
-        
-        # Métricas principais
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric(
-                "Aterro Sanitário",
-                f"{formatar_br(total_aterro)} kg GEE",
-                help=f"Total acumulado em {anos_simulacao} anos (CH₄ + N₂O)"
+            # Totais por cenário
+            df_continuo['Total_Aterro_tCO2eq_dia'] = (
+                df_continuo['CH4_Aterro_tCO2eq_dia'] + df_continuo['N2O_Aterro_tCO2eq_dia']
             )
-        
-        with col2:
-            reducao_vermi_kg = total_aterro - total_vermi
-            reducao_vermi_perc = (1 - total_vermi/total_aterro)*100 if total_aterro > 0 else 0
-            st.metric(
-                "Vermicompostagem",
-                f"{formatar_br(total_vermi)} kg GEE",
-                delta=f"-{formatar_br(reducao_vermi_perc)}%",
-                delta_color="inverse",
-                help=f"Redução de {formatar_br(reducao_vermi_kg)} kg vs aterro"
+            df_continuo['Total_Vermi_tCO2eq_dia'] = (
+                df_continuo['CH4_Vermi_tCO2eq_dia'] + df_continuo['N2O_Vermi_tCO2eq_dia']
             )
-        
-        with col3:
-            reducao_compost_kg = total_aterro - total_compost
-            reducao_compost_perc = (1 - total_compost/total_aterro)*100 if total_aterro > 0 else 0
-            st.metric(
-                "Compostagem Termofílica",
-                f"{formatar_br(total_compost)} kg GEE",
-                delta=f"-{formatar_br(reducao_compost_perc)}%",
-                delta_color="inverse",
-                help=f"Redução de {formatar_br(reducao_compost_kg)} kg vs aterro"
+            df_continuo['Total_Compost_tCO2eq_dia'] = (
+                df_continuo['CH4_Compost_tCO2eq_dia'] + df_continuo['N2O_Compost_tCO2eq_dia']
             )
-        
-        # Detalhamento por gás
-        with st.expander("🔍 Detalhamento por Gás de Efeito Estufa", expanded=False):
-            col1, col2, col3 = st.columns(3)
+            
+            # Acumulados
+            for cenario in ['Aterro', 'Vermi', 'Compost']:
+                col_dia = f'Total_{cenario}_tCO2eq_dia'
+                col_acum = f'Total_{cenario}_tCO2eq_acum'
+                df_continuo[col_acum] = df_continuo[col_dia].cumsum()
+            
+            # Reduções (emissões evitadas)
+            df_continuo['Reducao_Vermi_tCO2eq_acum'] = (
+                df_continuo['Total_Aterro_tCO2eq_acum'] - df_continuo['Total_Vermi_tCO2eq_acum']
+            )
+            df_continuo['Reducao_Compost_tCO2eq_acum'] = (
+                df_continuo['Total_Aterro_tCO2eq_acum'] - df_continuo['Total_Compost_tCO2eq_acum']
+            )
+            
+            # 4. RESULTADOS ANUAIS (agrupamento)
+            df_continuo['Ano'] = df_continuo['Data'].dt.year
+            df_anual = df_continuo.groupby('Ano').agg({
+                'Total_Aterro_tCO2eq_dia': 'sum',
+                'Total_Vermi_tCO2eq_dia': 'sum',
+                'Total_Compost_tCO2eq_dia': 'sum'
+            }).reset_index()
+            
+            df_anual.rename(columns={
+                'Total_Aterro_tCO2eq_dia': 'Aterro_Anual_tCO2eq',
+                'Total_Vermi_tCO2eq_dia': 'Vermi_Anual_tCO2eq',
+                'Total_Compost_tCO2eq_dia': 'Compost_Anual_tCO2eq'
+            }, inplace=True)
+            
+            df_anual['Reducao_Vermi_Anual_tCO2eq'] = (
+                df_anual['Aterro_Anual_tCO2eq'] - df_anual['Vermi_Anual_tCO2eq']
+            )
+            df_anual['Reducao_Compost_Anual_tCO2eq'] = (
+                df_anual['Aterro_Anual_tCO2eq'] - df_anual['Compost_Anual_tCO2eq']
+            )
+            
+            # 5. EXIBIR RESULTADOS
+            st.header("📊 Resultados - Entrada Contínua")
+            
+            # Totais acumulados
+            total_evitado_vermi = df_continuo['Reducao_Vermi_tCO2eq_acum'].iloc[-1]
+            total_evitado_compost = df_continuo['Reducao_Compost_tCO2eq_acum'].iloc[-1]
+            
+            # Médias anuais
+            media_anual_vermi = total_evitado_vermi / anos_simulacao_cont
+            media_anual_compost = total_evitado_compost / anos_simulacao_cont
+            
+            # Exibir métricas
+            col1, col2 = st.columns(2)
             
             with col1:
-                st.metric("CH₄ Aterro", f"{formatar_br(total_aterro_CH4)} kg")
-                st.metric("N₂O Aterro", f"{formatar_br(total_aterro_N2O)} kg")
+                st.markdown("#### 🪱 Vermicompostagem")
+                st.metric(
+                    "Total de emissões evitadas",
+                    f"{formatar_br(total_evitado_vermi)} tCO₂eq",
+                    help=f"Acumulado em {anos_simulacao_cont} anos"
+                )
+                st.metric(
+                    "Média anual",
+                    f"{formatar_br(media_anual_vermi)} tCO₂eq/ano",
+                    help="Emissões evitadas por ano em média"
+                )
             
             with col2:
-                st.metric("CH₄ Vermicompostagem", f"{formatar_br(total_vermi_CH4)} kg")
-                st.metric("N₂O Vermicompostagem", f"{formatar_br(total_vermi_N2O)} kg")
+                st.markdown("#### 🌡️ Compostagem Termofílica")
+                st.metric(
+                    "Total de emissões evitadas",
+                    f"{formatar_br(total_evitado_compost)} tCO₂eq",
+                    help=f"Acumulado em {anos_simulacao_cont} anos"
+                )
+                st.metric(
+                    "Média anual",
+                    f"{formatar_br(media_anual_compost)} tCO₂eq/ano",
+                    help="Emissões evitadas por ano em média"
+                )
             
-            with col3:
-                st.metric("CH₄ Compostagem", f"{formatar_br(total_compost_CH4)} kg")
-                st.metric("N₂O Compostagem", f"{formatar_br(total_compost_N2O)} kg")
-        
-        # =====================================================================
-        # 4. RESUMO DAS EMISSÕES EVITADAS - EXATAMENTE COMO NO v2n_noAr
-        # =====================================================================
-        
-        st.markdown("---")
-        st.header("📊 Resumo das Emissões Evitadas")
-        
-        # Calcular emissões evitadas em tCO₂eq
-        GWP_CH4 = 27.9  # kg CO₂eq por kg CH₄ (IPCC AR6)
-        GWP_N2O = 273   # kg CO₂eq por kg N₂O (IPCC AR6)
-        
-        # Metodologia da Tese (Vermicompostagem)
-        total_evitado_tese_kg = total_aterro - total_vermi
-        # Converter para CO₂eq usando fatores GWP
-        total_evitado_tese_co2eq = (
-            (total_aterro_CH4 - total_vermi_CH4) * GWP_CH4 +
-            (total_aterro_N2O - total_vermi_N2O) * GWP_N2O
-        )
-        total_evitado_tese_tco2eq = total_evitado_tese_co2eq / 1000
-        media_anual_tese = total_evitado_tese_tco2eq / anos_simulacao
-        
-        # Metodologia UNFCCC (Compostagem Termofílica)
-        total_evitado_unfccc_kg = total_aterro - total_compost
-        # Converter para CO₂eq usando fatores GWP
-        total_evitado_unfccc_co2eq = (
-            (total_aterro_CH4 - total_compost_CH4) * GWP_CH4 +
-            (total_aterro_N2O - total_compost_N2O) * GWP_N2O
-        )
-        total_evitado_unfccc_tco2eq = total_evitado_unfccc_co2eq / 1000
-        media_anual_unfccc = total_evitado_unfccc_tco2eq / anos_simulacao
-        
-        # Layout com duas colunas - EXATAMENTE COMO NO v2n_noAr
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### 📋 Metodologia da Tese")
-            st.metric(
-                "Total de emissões evitadas", 
-                f"{formatar_br(total_evitado_tese_tco2eq)} tCO₂eq",
-                help=f"Total acumulado em {anos_simulacao} anos"
-            )
-            st.metric(
-                "Média anual", 
-                f"{formatar_br(media_anual_tese)} tCO₂eq/ano",
-                help=f"Emissões evitadas por ano em média"
-            )
-        
-        with col2:
-            st.markdown("#### 📋 Metodologia UNFCCC")
-            st.metric(
-                "Total de emissões evitadas", 
-                f"{formatar_br(total_evitado_unfccc_tco2eq)} tCO₂eq",
-                help=f"Total acumulado em {anos_simulacao} anos"
-            )
-            st.metric(
-                "Média anual", 
-                f"{formatar_br(media_anual_unfccc)} tCO₂eq/ano",
-                help=f"Emissões evitadas por ano em média"
-            )
-        
-        # Comparação percentual
-        diferenca_absoluta = total_evitado_tese_tco2eq - total_evitado_unfccc_tco2eq
-        diferenca_percentual = (diferenca_absoluta / total_evitado_unfccc_tco2eq * 100) if total_evitado_unfccc_tco2eq > 0 else 0
-        
-        st.caption(f"""
-        📈 **Comparação:** A metodologia da Tese (Vermicompostagem) evita **{formatar_br(diferenca_absoluta)} tCO₂eq** 
-        ({diferenca_percentual:+.2f}%) a mais que a metodologia UNFCCC em {anos_simulacao} anos.
-        """)
-        
-        # =====================================================================
-        # 5. GRÁFICO: REDUÇÃO DE EMISSÕES ACUMULADA (20 ANOS)
-        # =====================================================================
-        
-        st.subheader(f"📉 Redução de Emissões Acumulada ({anos_simulacao} anos) - 1 Lote/dia")
-        
-        fig, ax = plt.subplots(figsize=(14, 7))
-        
-        # Configurar formatação
-        br_formatter = FuncFormatter(br_format)
-        
-        # Plotar linhas de acumulado
-        ax.plot(df_cont['Data'], df_cont['Aterro_Acumulado'], 'r-', 
-                label='Aterro Sanitário', linewidth=3, alpha=0.7)
-        ax.plot(df_cont['Data'], df_cont['Vermi_Acumulado'], 'g-', 
-                label='Vermicompostagem', linewidth=2)
-        ax.plot(df_cont['Data'], df_cont['Compost_Acumulado'], 'b-', 
-                label='Compostagem Termofílica', linewidth=2)
-        
-        # Área de redução (evitadas)
-        ax.fill_between(df_cont['Data'], df_cont['Vermi_Acumulado'], df_cont['Aterro_Acumulado'],
-                        color='green', alpha=0.3, label='Redução Vermicompostagem')
-        ax.fill_between(df_cont['Data'], df_cont['Compost_Acumulado'], df_cont['Aterro_Acumulado'],
-                        color='blue', alpha=0.2, label='Redução Compostagem')
-        
-        # Configurar gráfico
-        ax.set_title(f'Acumulado de GEE em {anos_simulacao} Anos - Entrada de {residuos_kg_dia} kg/dia', 
-                    fontsize=16, fontweight='bold')
-        ax.set_xlabel('Ano')
-        ax.set_ylabel('GEE Acumulado (kg CH₄ + N₂O)')
-        ax.legend(title='Cenário de Gestão', loc='upper left')
-        ax.grid(True, linestyle='--', alpha=0.5)
-        ax.yaxis.set_major_formatter(br_formatter)
-        
-        # Ajustar ticks do eixo x para mostrar anos
-        ax.set_xticks([df_cont['Data'].iloc[0] + pd.DateOffset(years=i) for i in range(0, anos_simulacao + 1, max(1, anos_simulacao//10))])
-        ax.set_xticklabels([f'Ano {i}' for i in range(0, anos_simulacao + 1, max(1, anos_simulacao//10))])
-        
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        
-        st.pyplot(fig)
-        
-        # =====================================================================
-        # 6. ANÁLISE FINANCEIRA
-        # =====================================================================
-        
-        st.header("💰 Análise Financeira - Entrada Contínua")
-        
-        # Simular cenários financeiros para ambas metodologias
-        cenarios_tese = simular_cenarios_financeiros(
-            total_evitado_tese_tco2eq, 
-            st.session_state.preco_carbono,
-            st.session_state.taxa_cambio
-        )
-        
-        cenarios_unfccc = simular_cenarios_financeiros(
-            total_evitado_unfccc_tco2eq,
-            st.session_state.preco_carbono,
-            st.session_state.taxa_cambio
-        )
-        
-        # Exibir métricas financeiras
-        st.subheader("🌍 Valor Financeiro das Emissões Evitadas")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric(
-                "Preço do Carbono",
-                f"€{st.session_state.preco_carbono:.2f}/tCO₂eq",
-                help=f"Fonte: {st.session_state.fonte_cotacao}"
-            )
-        
-        with col2:
-            valor_tese_eur = total_evitado_tese_tco2eq * st.session_state.preco_carbono
-            valor_tese_brl = valor_tese_eur * st.session_state.taxa_cambio
-            st.metric(
-                "Valor Tese (20 anos)",
-                f"R$ {formatar_br(valor_tese_brl)}",
-                help=f"€{formatar_br(valor_tese_eur)} em Euros"
-            )
-        
-        with col3:
-            valor_unfccc_eur = total_evitado_unfccc_tco2eq * st.session_state.preco_carbono
-            valor_unfccc_brl = valor_unfccc_eur * st.session_state.taxa_cambio
-            st.metric(
-                "Valor UNFCCC (20 anos)",
-                f"R$ {formatar_br(valor_unfccc_brl)}",
-                help=f"€{formatar_br(valor_unfccc_eur)} em Euros"
-            )
-        
-        # Tabela comparativa de cenários financeiros
-        st.subheader("📊 Comparação de Cenários Financeiros (20 anos)")
-        
-        dados_comparativos = []
-        for cenario in ['Otimista (Mercado Regulado)', 'Base (Mercado Voluntário)', 'Pessimista (Sem Créditos)']:
-            dados_comparativos.append({
-                'Cenário': cenario,
-                'Descrição': cenarios_tese[cenario]['descricao'],
-                'Metodologia Tese (R$)': formatar_br(cenarios_tese[cenario]['valor_total']),
-                'Metodologia UNFCCC (R$)': formatar_br(cenarios_unfccc[cenario]['valor_total']),
-                'Diferença (R$)': formatar_br(cenarios_tese[cenario]['valor_total'] - cenarios_unfccc[cenario]['valor_total']),
-                'Valor Anual Tese (R$/ano)': formatar_br(cenarios_tese[cenario]['valor_total'] / anos_simulacao)
-            })
-        
-        df_comparativo = pd.DataFrame(dados_comparativos)
-        st.dataframe(df_comparativo, use_container_width=True)
-        
-        # =====================================================================
-        # 7. RESUMO DETALHADO - ENTRADA CONTÍNUA
-        # =====================================================================
-        
-        with st.expander("📋 Resumo Detalhado da Análise - Entrada Contínua", expanded=False):
-            st.markdown(f"""
-            ### **Resumo da Análise - Entrada Contínua ({anos_simulacao} anos)**
+            # Diferença percentual
+            dif_percentual = ((total_evitado_vermi - total_evitado_compost) / total_evitado_compost * 100) if total_evitado_compost > 0 else 0
             
-            **Parâmetros Utilizados:**
-            - Lote diário: {residuos_kg_dia} kg/dia
-            - Umidade: {umidade_valor}% ({formatar_br(umidade)} fração)
-            - Temperatura: {temperatura}°C
-            - Período: {anos_simulacao} anos ({dias_total} dias)
-            - GWP CH₄ (IPCC AR6): 27.9 kg CO₂eq/kg CH₄
-            - GWP N₂O (IPCC AR6): 273 kg CO₂eq/kg N₂O
-            
-            **Resultados de GEE Acumulado ({anos_simulacao} anos):**
-            - **Aterro Sanitário:** {formatar_br(total_aterro)} kg GEE
-            - **Vermicompostagem:** {formatar_br(total_vermi)} kg GEE
-            - **Compostagem Termofílica:** {formatar_br(total_compost)} kg GEE
-            
-            **Reduções em Relação ao Aterro:**
-            - **Vermicompostagem:** {formatar_br(total_aterro - total_vermi)} kg GEE ({formatar_br(reducao_vermi_perc)}%)
-            - **Compostagem:** {formatar_br(total_aterro - total_compost)} kg GEE ({formatar_br(reducao_compost_perc)}%)
-            
-            **Em CO₂eq Evitadas ({anos_simulacao} anos):**
-            - **Metodologia da Tese:** {formatar_br(total_evitado_tese_tco2eq)} tCO₂eq
-            - **Metodologia UNFCCC:** {formatar_br(total_evitado_unfccc_tco2eq)} tCO₂eq
-            - **Diferença:** {diferenca_percentual:+.2f}%
-            
-            **Métricas Anuais Médias:**
-            - **Aterro:** {formatar_br(total_aterro / anos_simulacao)} kg GEE/ano
-            - **Vermicompostagem:** {formatar_br(total_vermi / anos_simulacao)} kg GEE/ano
-            - **Compostagem:** {formatar_br(total_compost / anos_simulacao)} kg GEE/ano
-            - **Redução Tese:** {formatar_br(media_anual_tese)} tCO₂eq/ano
-            - **Redução UNFCCC:** {formatar_br(media_anual_unfccc)} tCO₂eq/ano
-            
-            **Cenário Financeiro Mais Favorável (Regulado - {anos_simulacao} anos):**
-            - **Metodologia da Tese:** R$ {formatar_br(cenarios_tese['Otimista (Mercado Regulado)']['valor_total'])}
-            - **Metodologia UNFCCC:** R$ {formatar_br(cenarios_unfccc['Otimista (Mercado Regulado)']['valor_total'])}
-            
-            **Valor Anual Médio (Regulado):**
-            - **Metodologia da Tese:** R$ {formatar_br(cenarios_tese['Otimista (Mercado Regulado)']['valor_total'] / anos_simulacao)}/ano
-            - **Metodologia UNFCCC:** R$ {formatar_br(cenarios_unfccc['Otimista (Mercado Regulado)']['valor_total'] / anos_simulacao)}/ano
-            
-            **💡 Conclusão:**
-            A simulação de entrada contínua mostra que, ao longo de {anos_simulacao} anos, a vermicompostagem 
-            apresenta uma redução significativa de {formatar_br(reducao_vermi_perc)}% nas emissões de GEE 
-            em comparação com o aterro, enquanto a compostagem reduz {formatar_br(reducao_compost_perc)}%.
-            A metodologia da Tese (vermicompostagem) é {diferenca_percentual:+.2f}% mais eficiente que a 
-            metodologia UNFCCC em termos de redução de emissões.
-            
-            **⚖️ Viabilidade Financeira em Larga Escala:**
-            - **Mercado Regulado:** Projeto altamente atrativo, com retorno financeiro significativo
-            - **Mercado Voluntário:** Viabilidade moderada, pode ser complementado com outras receitas
-            - **Sem Créditos:** Necessidade de políticas públicas ou incentivos para viabilizar
-            
-            **📊 Recomendação:**
-            A vermicompostagem em reatores apresenta melhor desempenho ambiental e maior potencial 
-            financeiro no mercado de carbono, especialmente no cenário regulado da UE.
+            st.info(f"""
+            **📈 Comparação:** A vermicompostagem evita **{dif_percentual:+.1f}%** mais emissões 
+            que a compostagem termofílica ({formatar_br(total_evitado_vermi - total_evitado_compost)} tCO₂eq de diferença).
             """)
-
-else:
-    st.info("💡 Configure os parâmetros no painel lateral e clique no botão correspondente para iniciar a simulação.")
+            
+            # 6. GRÁFICO DE REDUÇÃO ACUMULADA
+            st.subheader("📉 Redução de Emissões Acumulada")
+            
+            fig, ax = plt.subplots(figsize=(12, 6))
+            
+            ax.plot(df_continuo['Data'], df_continuo['Total_Aterro_tCO2eq_acum'], 
+                   'r-', label='Cenário Base (Aterro)', linewidth=2, alpha=0.8)
+            ax.plot(df_continuo['Data'], df_continuo['Total_Vermi_tCO2eq_acum'], 
+                   'g-', label='Vermicompostagem', linewidth=2)
+            ax.plot(df_continuo['Data'], df_continuo['Total_Compost_tCO2eq_acum'], 
+                   'b-', label='Compostagem Termofílica', linewidth=2)
+            
+            # Área de redução
+            ax.fill_between(df_continuo['Data'], 
+                           df_continuo['Total_Vermi_tCO2eq_acum'], 
+                           df_continuo['Total_Aterro_tCO2eq_acum'],
+                           color='green', alpha=0.2, label='Redução Vermicompostagem')
+            ax.fill_between(df_continuo['Data'], 
+                           df_continuo['Total_Compost_tCO2eq_acum'], 
+                           df_continuo['Total_Aterro_tCO2eq_acum'],
+                           color='blue', alpha=0.1, label='Redução Compostagem')
+            
+            ax.set_title(f'Emissões Acumuladas - {residuos_kg_dia} kg/dia × {anos_simulacao_cont} anos', 
+                        fontsize=14, fontweight='bold')
+            ax.set_xlabel('Data')
+            ax.set_ylabel('tCO₂eq Acumulado')
+            ax.legend(title='Cenário de Gestão', loc='upper left')
+            ax.grid(True, linestyle='--', alpha=0.5)
+            ax.yaxis.set_major_formatter(FuncFormatter(br_format))
+            
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            st.pyplot(fig)
+            
+            # 7. COMPARAÇÃO COM SCRIPT 2
+            st.subheader("🔗 Comparação com Metodologia da Tese (Tabela 18)")
+            
+            # Calcular usando os mesmos parâmetros do Script 2 para comparação
+            # Para 100 kg/dia × 20 anos, o Script 2 mostra 1.405,87 tCO₂eq para vermicompostagem
+            
+            # Fator de escala para 100 kg/dia
+            if residuos_kg_dia == 100 and anos_simulacao_cont == 20:
+                st.success(f"""
+                **✅ Resultado Comparável ao Script 2 (Tabela 18):**
+                
+                Sua simulação ({residuos_kg_dia} kg/dia × {anos_simulacao_cont} anos) é diretamente comparável 
+                aos resultados do Script 2 que mostram **1.405,87 tCO₂eq** para vermicompostagem.
+                
+                **Seu resultado:** {formatar_br(total_evitado_vermi)} tCO₂eq
+                **Diferença:** {formatar_br(total_evitado_vermi - 1405.87)} tCO₂eq ({((total_evitado_vermi - 1405.87)/1405.87*100):+.1f}%)
+                
+                *Nota: Pequenas diferenças são esperadas devido a variações nos parâmetros ambientais.*
+                """)
+            else:
+                st.info(f"""
+                **📊 Para comparação com o Script 2 (Tabela 18):**
+                
+                O Script 2 mostra **1.405,87 tCO₂eq** para 100 kg/dia × 20 anos com vermicompostagem.
+                
+                **Sua simulação atual:** {formatar_br(total_evitado_vermi)} tCO₂eq
+                **Escala:** {residuos_kg_dia} kg/dia × {anos_simulacao_cont} anos
+                
+                *Para comparar diretamente, configure: 100 kg/dia × 20 anos*
+                """)
 
 # =============================================================================
 # RODAPÉ
@@ -1421,9 +1064,6 @@ st.markdown("""
 - Yang et al. (2017). Greenhouse gas emissions during MSW landfilling in China
 - UNFCCC (2016). Clean Development Mechanism - Methodology AMS-III.F
 - EU ETS Market Data (2024). European Carbon Futures
-- Wang et al. (2017). Emissions of N₂O from landfilling of municipal solid waste
 
 **🔧 Desenvolvido para análise comparativa de potenciais de metano em diferentes cenários de gestão de resíduos.**
-**🔄 Nova Funcionalidade: Simulação de entrada contínua (1 lote/dia por 20 anos) baseada no script v2n_noAr.**
-**📊 Nova Seção: Resumo das Emissões Evitadas com comparação entre Metodologia da Tese e UNFCCC.**
 """)

@@ -10,7 +10,11 @@ from bs4 import BeautifulSoup
 import warnings
 
 # Configurações iniciais
-st.set_page_config(page_title="Potencial de Metano - Simulação Aterro vs Compostagem", layout="wide")
+st.set_page_config(
+    page_title="Potencial de Metano - Simulação Aterro vs Compostagem", 
+    layout="wide",
+    page_icon="🌱"
+)
 warnings.filterwarnings("ignore", category=FutureWarning)
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
@@ -20,7 +24,7 @@ plt.rcParams['font.size'] = 10
 sns.set_style("whitegrid")
 
 # =============================================================================
-# FUNÇÕES DE COTAÇÃO DO CARBONO E CÂMBIO (MANTIDAS DO SCRIPT ORIGINAL)
+# FUNÇÕES DE COTAÇÃO DO CARBONO E CÂMBIO
 # =============================================================================
 
 def obter_cotacao_carbono_investing():
@@ -148,7 +152,7 @@ def calcular_potencial_metano_aterro(residuos_kg, umidade, temperatura, dias=365
     # Distribuir o potencial total ao longo do tempo
     emissoes_CH4 = potencial_CH4_total * kernel_ch4
     
-    return emissoes_CH4, potencial_CH4_total
+    return emissoes_CH4, potencial_CH4_total, DOCf
 
 def calcular_emissoes_vermicompostagem(residuos_kg, umidade, dias=50):
     """
@@ -156,7 +160,7 @@ def calcular_emissoes_vermicompostagem(residuos_kg, umidade, dias=50):
     """
     # Parâmetros fixos para vermicompostagem
     TOC = 0.436  # Fração de carbono orgânico total
-    CH4_C_FRAC = 0.13 / 100  # Fração do TOC emitida como CH4-C
+    CH4_C_FRAC = 0.13 / 100  # Fração do TOC emitida como CH4-C (0.13%)
     fracao_ms = 1 - umidade  # Fração de matéria seca
     
     # Metano total por lote
@@ -190,7 +194,7 @@ def calcular_emissoes_compostagem(residuos_kg, umidade, dias=50):
     """
     # Parâmetros fixos para compostagem termofílica
     TOC = 0.436  # Fração de carbono orgânico total
-    CH4_C_FRAC = 0.006  # Fração do TOC emitida como CH4-C
+    CH4_C_FRAC = 0.006  # Fração do TOC emitida como CH4-C (0.6%)
     fracao_ms = 1 - umidade  # Fração de matéria seca
     
     # Metano total por lote
@@ -430,7 +434,7 @@ if st.session_state.get('run_simulation', False):
         # =====================================================================
         
         # Aterro Sanitário
-        emissoes_aterro, total_aterro = calcular_potencial_metano_aterro(
+        emissoes_aterro, total_aterro, DOCf = calcular_potencial_metano_aterro(
             residuos_kg, umidade, temperatura, dias_simulacao
         )
         
@@ -489,22 +493,49 @@ if st.session_state.get('run_simulation', False):
             )
         
         with col2:
+            reducao_vermi_kg = total_aterro - total_vermi
+            reducao_vermi_perc = (1 - total_vermi/total_aterro)*100 if total_aterro > 0 else 0
             st.metric(
                 "Vermicompostagem",
                 f"{formatar_br(total_vermi)} kg CH₄",
-                delta=f"-{formatar_br((1 - total_vermi/total_aterro)*100)}%",
+                delta=f"-{formatar_br(reducao_vermi_perc)}%",
                 delta_color="inverse",
-                help=f"Redução de {formatar_br(total_aterro - total_vermi)} kg vs aterro"
+                help=f"Redução de {formatar_br(reducao_vermi_kg)} kg vs aterro"
             )
         
         with col3:
+            reducao_compost_kg = total_aterro - total_compost
+            reducao_compost_perc = (1 - total_compost/total_aterro)*100 if total_aterro > 0 else 0
             st.metric(
                 "Compostagem Termofílica",
                 f"{formatar_br(total_compost)} kg CH₄",
-                delta=f"-{formatar_br((1 - total_compost/total_aterro)*100)}%",
+                delta=f"-{formatar_br(reducao_compost_perc)}%",
                 delta_color="inverse",
-                help=f"Redução de {formatar_br(total_aterro - total_compost)} kg vs aterro"
+                help=f"Redução de {formatar_br(reducao_compost_kg)} kg vs aterro"
             )
+        
+        # Exibir parâmetros intermediários de cálculo
+        with st.expander("🧮 Detalhes dos Cálculos Intermediários", expanded=False):
+            st.markdown(f"""
+            **Parâmetros Intermediários para Aterro:**
+            - **DOC (Carbono Orgânico Degradável):** 0.15 (fração)
+            - **DOCf (fração degradável):** {DOCf:.4f} (calculado: 0.0147 × {temperatura}°C + 0.28)
+            - **MCF (Fator de Correção de Metano):** 1.0
+            - **F (Fração de Metano no Biogás):** 0.5
+            - **OX (Fator de Oxidação):** 0.1
+            - **Ri (Metano Recuperado):** 0.0
+            - **Potencial CH₄ por kg:** {formatar_br(total_aterro/residuos_kg if residuos_kg > 0 else 0)} kg CH₄/kg resíduo
+            
+            **Parâmetros para Vermicompostagem:**
+            - **TOC (Carbono Orgânico Total):** 0.436
+            - **CH₄_C_FRAC (Fração emitida):** 0.13%
+            - **Matéria Seca:** {formatar_br((1-umidade)*100)}%
+            
+            **Parâmetros para Compostagem:**
+            - **TOC (Carbono Orgânico Total):** 0.436
+            - **CH₄_C_FRAC (Fração emitida):** 0.6%
+            - **Matéria Seca:** {formatar_br((1-umidade)*100)}%
+            """)
         
         # =====================================================================
         # 4. GRÁFICO: REDUÇÃO DE EMISSÕES ACUMULADA
@@ -532,7 +563,8 @@ if st.session_state.get('run_simulation', False):
                         color='blue', alpha=0.2, label='Redução Compostagem')
         
         # Configurar gráfico
-        ax.set_title(f'Acumulado de Metano em {dias_simulacao} Dias - Lote de {residuos_kg} kg', fontsize=14, fontweight='bold')
+        ax.set_title(f'Acumulado de Metano em {dias_simulacao} Dias - Lote de {residuos_kg} kg', 
+                    fontsize=14, fontweight='bold')
         ax.set_xlabel('Data')
         ax.set_ylabel('Metano Acumulado (kg CH₄)')
         ax.legend(title='Cenário de Gestão', loc='upper left')
@@ -556,23 +588,31 @@ if st.session_state.get('run_simulation', False):
         # Plotar emissões diárias (apenas primeiros 100 dias para melhor visualização)
         dias_exibir = min(100, dias_simulacao)
         
-        ax.plot(df['Data'][:dias_exibir], df['Aterro_CH4_kg'][:dias_exibir], 'r-', 
-                label='Aterro', linewidth=2, alpha=0.7)
-        ax.plot(df['Data'][:dias_exibir], df['Vermicompostagem_CH4_kg'][:dias_exibir], 'g-', 
-                label='Vermicompostagem', linewidth=2)
-        ax.plot(df['Data'][:dias_exibir], df['Compostagem_CH4_kg'][:dias_exibir], 'b-', 
-                label='Compostagem', linewidth=2)
+        # Criar gráfico com barras para visualizar melhor as diferenças
+        x_pos = np.arange(dias_exibir)
+        bar_width = 0.25
         
-        ax.set_title(f'Emissões Diárias de Metano (Primeiros {dias_exibir} Dias)', fontsize=14, fontweight='bold')
-        ax.set_xlabel('Data')
+        # Usar barras para visualização mais clara
+        ax.bar(x_pos - bar_width, df['Aterro_CH4_kg'][:dias_exibir], bar_width, 
+                label='Aterro', color='red', alpha=0.7)
+        ax.bar(x_pos, df['Vermicompostagem_CH4_kg'][:dias_exibir], bar_width, 
+                label='Vermicompostagem', color='green', alpha=0.7)
+        ax.bar(x_pos + bar_width, df['Compostagem_CH4_kg'][:dias_exibir], bar_width, 
+                label='Compostagem', color='blue', alpha=0.7)
+        
+        ax.set_xlabel('Dias')
         ax.set_ylabel('Metano (kg CH₄/dia)')
+        ax.set_title(f'Emissões Diárias de Metano (Primeiros {dias_exibir} Dias)', 
+                    fontsize=14, fontweight='bold')
         ax.legend(title='Cenário')
-        ax.grid(True, linestyle='--', alpha=0.5)
+        ax.grid(True, linestyle='--', alpha=0.5, axis='y')
         ax.yaxis.set_major_formatter(br_formatter)
         
-        plt.xticks(rotation=45)
-        plt.tight_layout()
+        # Ajustar ticks do eixo x
+        ax.set_xticks(x_pos[::10])
+        ax.set_xticklabels([f'Dia {i+1}' for i in x_pos[::10]])
         
+        plt.tight_layout()
         st.pyplot(fig)
         
         # =====================================================================
@@ -580,7 +620,7 @@ if st.session_state.get('run_simulation', False):
         # =====================================================================
         
         with st.expander("🧮 Fórmulas Utilizadas nos Cálculos", expanded=False):
-            st.markdown("""
+            st.markdown(f"""
             ### **Aterro Sanitário (IPCC 2006)**
             
             **Potencial de Metano por kg de resíduo:**
@@ -590,7 +630,7 @@ if st.session_state.get('run_simulation', False):
             
             **Onde:**
             - **DOC** = Carbono Orgânico Degradável = 0.15 (fração)
-            - **DOCf** = 0.0147 × T + 0.28 (T = temperatura em °C)
+            - **DOCf** = 0.0147 × T + 0.28 (T = {temperatura}°C) = {DOCf:.4f}
             - **MCF** = Fator de Correção de Metano = 1.0 (aterros sanitários)
             - **F** = Fração de Metano no Biogás = 0.5
             - **OX** = Fator de Oxidação = 0.1
@@ -607,24 +647,28 @@ if st.session_state.get('run_simulation', False):
             **Metano total por lote:**
             ```
             CH₄_total = Resíduos × TOC × CH₄_C_FRAC × (16/12) × (1 - Umidade)
+            CH₄_total = {residuos_kg} × 0.436 × 0.0013 × (16/12) × (1 - {umidade:.3f})
+            CH₄_total = {formatar_br(total_vermi)} kg CH₄
             ```
             
             **Onde:**
             - **TOC** = Carbono Orgânico Total = 0.436 (fração)
-            - **CH₄_C_FRAC** = Fração do TOC emitida como CH₄-C = 0.0013
-            - **Perfil temporal**: Distribuição baseada em Yang et al. (2017) - 50 dias
+            - **CH₄_C_FRAC** = Fração do TOC emitida como CH₄-C = 0.0013 (0.13%)
+            - **Perfil temporal**: Distribuição baseada em Yang et al. (2017) - {dias_vermi} dias
             
             ### **Compostagem Termofílica (Yang et al. 2017)**
             
             **Metano total por lote:**
             ```
             CH₄_total = Resíduos × TOC × CH₄_C_FRAC × (16/12) × (1 - Umidade)
+            CH₄_total = {residuos_kg} × 0.436 × 0.006 × (16/12) × (1 - {umidade:.3f})
+            CH₄_total = {formatar_br(total_compost)} kg CH₄
             ```
             
             **Onde:**
             - **TOC** = Carbono Orgânico Total = 0.436 (fração)
-            - **CH₄_C_FRAC** = Fração do TOC emitida como CH₄-C = 0.006
-            - **Perfil temporal**: Distribuição específica para compostagem termofílica - 50 dias
+            - **CH₄_C_FRAC** = Fração do TOC emitida como CH₄-C = 0.006 (0.6%)
+            - **Perfil temporal**: Distribuição específica para compostagem termofílica - {dias_compost} dias
             """)
         
         # =====================================================================
@@ -654,6 +698,25 @@ if st.session_state.get('run_simulation', False):
             st.session_state.preco_carbono,
             st.session_state.taxa_cambio
         )
+        
+        # Exibir métricas de CO₂eq
+        st.subheader("🌍 Impacto em CO₂eq (Potencial de Aquecimento Global)")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric(
+                "Vermicompostagem",
+                f"{formatar_br(total_evitado_vermi_tco2eq)} tCO₂eq",
+                help=f"Equivalente a {formatar_br(total_evitado_vermi_tco2eq * 1000)} kg CO₂eq"
+            )
+        
+        with col2:
+            st.metric(
+                "Compostagem",
+                f"{formatar_br(total_evitado_compost_tco2eq)} tCO₂eq",
+                help=f"Equivalente a {formatar_br(total_evitado_compost_tco2eq * 1000)} kg CO₂eq"
+            )
         
         # Exibir tabela comparativa
         st.subheader("📊 Comparação de Cenários Financeiros")
@@ -695,10 +758,12 @@ if st.session_state.get('run_simulation', False):
         
         # Adicionar valores nas barras
         for i, (v1, v2) in enumerate(zip(valores_vermi, valores_compost)):
-            ax.text(i - width/2, v1 + max(v1, v2)*0.01, f'R${v1:,.0f}', 
-                   ha='center', fontsize=9, fontweight='bold')
-            ax.text(i + width/2, v2 + max(v1, v2)*0.01, f'R${v2:,.0f}', 
-                   ha='center', fontsize=9, fontweight='bold')
+            if v1 > 0:
+                ax.text(i - width/2, v1 + max(v1, v2)*0.01, f'R${v1:,.0f}', 
+                       ha='center', fontsize=9, fontweight='bold')
+            if v2 > 0:
+                ax.text(i + width/2, v2 + max(v1, v2)*0.01, f'R${v2:,.0f}', 
+                       ha='center', fontsize=9, fontweight='bold')
         
         plt.tight_layout()
         st.pyplot(fig)
@@ -715,6 +780,7 @@ if st.session_state.get('run_simulation', False):
             - Umidade: {umidade_valor}% ({formatar_br(umidade)} fração)
             - Temperatura: {temperatura}°C
             - Período: {dias_simulacao} dias
+            - GWP CH₄ (IPCC AR6): 27.9 kg CO₂eq/kg CH₄
             
             **Resultados de Metano:**
             - **Aterro Sanitário:** {formatar_br(total_aterro)} kg CH₄
@@ -722,12 +788,12 @@ if st.session_state.get('run_simulation', False):
             - **Compostagem Termofílica:** {formatar_br(total_compost)} kg CH₄
             
             **Reduções em Relação ao Aterro:**
-            - **Vermicompostagem:** {formatar_br(total_aterro - total_vermi)} kg CH₄ ({formatar_br((1 - total_vermi/total_aterro)*100)}%)
-            - **Compostagem:** {formatar_br(total_aterro - total_compost)} kg CH₄ ({formatar_br((1 - total_compost/total_aterro)*100)}%)
+            - **Vermicompostagem:** {formatar_br(total_aterro - total_vermi)} kg CH₄ ({formatar_br(reducao_vermi_perc)}%)
+            - **Compostagem:** {formatar_br(total_aterro - total_compost)} kg CH₄ ({formatar_br(reducao_compost_perc)}%)
             
-            **Em CO₂eq (GWP CH₄ = 27.9):**
-            - **Vermicompostagem:** {formatar_br(total_evitado_vermi_tco2eq)} tCO₂eq evitadas
-            - **Compostagem:** {formatar_br(total_evitado_compost_tco2eq)} tCO₂eq evitadas
+            **Em CO₂eq Evitadas:**
+            - **Vermicompostagem:** {formatar_br(total_evitado_vermi_tco2eq)} tCO₂eq
+            - **Compostagem:** {formatar_br(total_evitado_compost_tco2eq)} tCO₂eq
             
             **Cenário Financeiro Mais Favorável (Regulado):**
             - **Vermicompostagem:** R$ {formatar_br(cenarios_vermi['Otimista (Mercado Regulado)']['valor_total'])}
@@ -735,62 +801,14 @@ if st.session_state.get('run_simulation', False):
             
             **💡 Conclusão:**
             A vermicompostagem apresenta maior potencial de redução de emissões de metano 
-            ({formatar_br((1 - total_vermi/total_aterro)*100)}% vs {formatar_br((1 - total_compost/total_aterro)*100)}% da compostagem),
+            ({formatar_br(reducao_vermi_perc)}% vs {formatar_br(reducao_compost_perc)}% da compostagem),
             resultando em maior valor financeiro potencial no mercado de carbono.
+            
+            **⚖️ Viabilidade Financeira:**
+            - **Mercado Regulado:** Projeto altamente viável para ambas tecnologias
+            - **Mercado Voluntário:** Viabilidade moderada, depende de outros benefícios
+            - **Sem Créditos:** Necessidade de subsídios ou outras fontes de receita
             """)
-        
-        # =====================================================================
-        # 9. OPÇÃO PARA BAIXAR OS DADOS
-        # =====================================================================
-        
-        st.subheader("💾 Download dos Resultados")
-        
-        # Criar DataFrame para download
-        df_download = df.copy()
-        df_download['Data'] = df_download['Data'].dt.strftime('%Y-%m-%d')
-        
-        # Converter para CSV
-        csv = df_download.to_csv(index=False).encode('utf-8')
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.download_button(
-                label="📥 Baixar Dados Completos (CSV)",
-                data=csv,
-                file_name=f"potencial_metano_{residuos_kg}kg.csv",
-                mime="text/csv"
-            )
-        
-        with col2:
-            st.download_button(
-                label="📥 Baixar Resumo (TXT)",
-                data=f"""
-                RESUMO DA SIMULAÇÃO - POTENCIAL DE METANO
-                Data: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-                
-                PARÂMETROS:
-                - Lote de resíduos: {residuos_kg} kg
-                - Umidade: {umidade_valor}%
-                - Temperatura: {temperatura}°C
-                - Período: {dias_simulacao} dias
-                
-                RESULTADOS (kg CH₄):
-                - Aterro Sanitário: {formatar_br(total_aterro)} kg
-                - Vermicompostagem: {formatar_br(total_vermi)} kg
-                - Compostagem Termofílica: {formatar_br(total_compost)} kg
-                
-                REDUÇÕES:
-                - Vermicompostagem vs Aterro: {formatar_br(total_aterro - total_vermi)} kg ({formatar_br((1 - total_vermi/total_aterro)*100)}%)
-                - Compostagem vs Aterro: {formatar_br(total_aterro - total_compost)} kg ({formatar_br((1 - total_compost/total_aterro)*100)}%)
-                
-                VALOR FINANCEIRO (Cenário Regulado):
-                - Vermicompostagem: R$ {formatar_br(cenarios_vermi['Otimista (Mercado Regulado)']['valor_total'])}
-                - Compostagem: R$ {formatar_br(cenarios_compost['Otimista (Mercado Regulado)']['valor_total'])}
-                """.encode('utf-8'),
-                file_name=f"resumo_potencial_metano_{residuos_kg}kg.txt",
-                mime="text/plain"
-            )
 
 else:
     st.info("💡 Configure os parâmetros no painel lateral e clique em 'Calcular Potencial de Metano' para iniciar a simulação.")

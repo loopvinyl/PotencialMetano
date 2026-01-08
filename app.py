@@ -146,8 +146,8 @@ def calcular_potencial_metano_aterro(residuos_kg, umidade, temperatura, dias=365
     t = np.arange(1, dias + 1, dtype=float)
     kernel_ch4 = np.exp(-k_ano * (t - 1) / 365.0) - np.exp(-k_ano * t / 365.0)
     
-    # Normalizar o kernel para que a soma seja 1
-    kernel_ch4 = kernel_ch4 / kernel_ch4.sum()
+    # NÃO NORMALIZAR - Mantém consistência com script principal
+    # kernel_ch4 = kernel_ch4 / kernel_ch4.sum()  # REMOVIDO
     
     # Distribuir o potencial total ao longo do tempo
     emissoes_CH4 = potencial_CH4_total * kernel_ch4
@@ -180,7 +180,7 @@ def calcular_emissoes_vermicompostagem(residuos_kg, umidade, dias=50):
         0.001, 0.001, 0.001, 0.001, 0.001   # Dias 46-50
     ])
     
-    # Normalizar perfil
+    # Normalizar perfil (apenas para vermicompostagem, que tem processo definido)
     perfil_ch4 = perfil_ch4 / perfil_ch4.sum()
     
     # Distribuir emissões
@@ -214,7 +214,7 @@ def calcular_emissoes_compostagem(residuos_kg, umidade, dias=50):
         0.001, 0.001, 0.001, 0.001, 0.001   # Dias 46-50
     ])
     
-    # Normalizar perfil
+    # Normalizar perfil (apenas para compostagem, que tem processo definido)
     perfil_ch4 = perfil_ch4 / perfil_ch4.sum()
     
     # Distribuir emissões
@@ -230,25 +230,26 @@ def calcular_emissoes_aterro_completo_continuo(residuos_kg_dia, umidade, tempera
                                                massa_exposta_kg, h_exposta, dias_simulacao):
     """
     Calcula CH₄ + N₂O do aterro para entrada contínua
-    Baseado no Script 2 (Zziwa et al. adaptado)
+    Baseado no Script 2 (Zziwa et al. adaptado) - CONSISTENTE COM SCRIPT PRINCIPAL
     """
-    # Parâmetros fixos do aterro
+    # Parâmetros fixos do aterro (iguais ao script principal)
     MCF = 1.0
     F = 0.5
     OX = 0.1
     Ri = 0.0
-    k_ano = 0.06
+    k_ano = 0.06  # Constante de decaimento anual
     
     # 1. CÁLCULO DE CH₄ (METANO)
     DOCf = 0.0147 * temperatura + 0.28
     potencial_CH4_por_kg = doc_val * DOCf * MCF * F * (16/12) * (1 - Ri) * (1 - OX)
     potencial_CH4_lote_diario = residuos_kg_dia * potencial_CH4_por_kg
     
-    # Perfil temporal de decaimento
+    # Perfil temporal de decaimento - NÃO NORMALIZAR (igual script principal)
     t = np.arange(1, dias_simulacao + 1, dtype=float)
     kernel_ch4 = np.exp(-k_ano * (t - 1) / 365.0) - np.exp(-k_ano * t / 365.0)
-    kernel_ch4 = kernel_ch4 / kernel_ch4.sum()  # Normalizar
+    # NÃO NORMALIZAR: kernel_ch4 = kernel_ch4 / kernel_ch4.sum()  # REMOVIDO
     
+    # Convolução para entrada contínua
     entradas_diarias = np.ones(dias_simulacao, dtype=float)
     emissoes_CH4 = np.convolve(entradas_diarias, kernel_ch4, mode='full')[:dias_simulacao]
     emissoes_CH4 *= potencial_CH4_lote_diario
@@ -302,13 +303,13 @@ def calcular_emissoes_aterro_completo_continuo(residuos_kg_dia, umidade, tempera
 def calcular_emissoes_vermi_completo_continuo(residuos_kg_dia, umidade, dias_simulacao):
     """
     Calcula CH₄ + N₂O da vermicompostagem para entrada contínua
-    Baseado em Yang et al. (2017)
+    Baseado em Yang et al. (2017) - Valores fixos como no script principal
     """
-    # Parâmetros fixos
+    # Parâmetros fixos (IGUAIS ao script principal)
     TOC_YANG = 0.436  # Fração de carbono orgânico total
     TN_YANG = 14.2 / 1000  # Fração de nitrogênio total
-    CH4_C_FRAC_YANG = 0.13 / 100  # 0.13%
-    N2O_N_FRAC_YANG = 0.92 / 100  # 0.92%
+    CH4_C_FRAC_YANG = 0.13 / 100  # 0.13% - FIXO
+    N2O_N_FRAC_YANG = 0.92 / 100  # 0.92% - FIXO
     
     fracao_ms = 1 - umidade
     
@@ -318,7 +319,7 @@ def calcular_emissoes_vermi_completo_continuo(residuos_kg_dia, umidade, dias_sim
     # Óxido nitroso total por lote diário
     n2o_total_por_lote_diario = residuos_kg_dia * (TN_YANG * N2O_N_FRAC_YANG * (44/28) * fracao_ms)
     
-    # Perfis temporais (50 dias)
+    # Perfis temporais (50 dias) - IGUAIS ao script principal
     PERFIL_CH4_VERMI = np.array([
         0.02, 0.02, 0.02, 0.03, 0.03, 0.04, 0.04, 0.05, 0.05, 0.06,
         0.07, 0.08, 0.09, 0.10, 0.09, 0.08, 0.07, 0.06, 0.05, 0.04,
@@ -354,13 +355,13 @@ def calcular_emissoes_vermi_completo_continuo(residuos_kg_dia, umidade, dias_sim
 def calcular_emissoes_compostagem_completo_continuo(residuos_kg_dia, umidade, dias_simulacao):
     """
     Calcula CH₄ + N₂O da compostagem termofílica para entrada contínua
-    Baseado em Yang et al. (2017)
+    Baseado em Yang et al. (2017) - Valores fixos como no script principal
     """
-    # Parâmetros fixos
+    # Parâmetros fixos (IGUAIS ao script principal)
     TOC_YANG = 0.436
     TN_YANG = 14.2 / 1000
-    CH4_C_FRAC_THERMO = 0.006  # 0.6%
-    N2O_N_FRAC_THERMO = 0.0196  # 1.96%
+    CH4_C_FRAC_THERMO = 0.006  # 0.6% - FIXO
+    N2O_N_FRAC_THERMO = 0.0196  # 1.96% - FIXO
     
     fracao_ms = 1 - umidade
     
@@ -368,7 +369,7 @@ def calcular_emissoes_compostagem_completo_continuo(residuos_kg_dia, umidade, di
     ch4_total_por_lote_diario = residuos_kg_dia * (TOC_YANG * CH4_C_FRAC_THERMO * (16/12) * fracao_ms)
     n2o_total_por_lote_diario = residuos_kg_dia * (TN_YANG * N2O_N_FRAC_THERMO * (44/28) * fracao_ms)
     
-    # Perfis temporais (50 dias)
+    # Perfis temporais (50 dias) - IGUAIS ao script principal
     PERFIL_CH4_THERMO = np.array([
         0.01, 0.02, 0.03, 0.05, 0.08, 0.12, 0.15, 0.18, 0.20, 0.18,
         0.15, 0.12, 0.10, 0.08, 0.06, 0.05, 0.04, 0.03, 0.02, 0.02,

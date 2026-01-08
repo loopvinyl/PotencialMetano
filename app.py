@@ -572,7 +572,7 @@ with st.sidebar:
             help="Peso de cada lote diário de resíduos orgânicos"
         )
         
-        st.subheader("📊 Parâmetros Ambientais")
+        st.subheader("📊 Parámetros Ambientais")
         
         umidade_valor = st.slider(
             "Umidade do resíduo (%)", 
@@ -1244,79 +1244,277 @@ elif st.session_state.get('run_continuous_simulation', False) and tipo_simulacao
         st.pyplot(fig)
         
         # =====================================================================
-        # 7. ANÁLISE FINANCEIRA PARA ENTRADA CONTÍNUA
+        # 7. RESUMO DAS EMISSÕES EVITADAS - NOVA SEÇÃO (BASEADO EM v2n_noAr)
+        # =====================================================================
+        
+        st.markdown("---")
+        st.header("📊 Resumo das Emissões Evitadas")
+        
+        # Calcular emissões evitadas para ambas metodologias em tCO₂eq
+        GWP_CH4 = 27.9  # kg CO₂eq por kg CH₄ (IPCC AR6)
+        
+        # Metodologia da Tese (Vermicompostagem)
+        total_evitado_tese_kg = (total_aterro_cont - total_vermi_cont) * GWP_CH4
+        total_evitado_tese_tco2eq = total_evitado_tese_kg / 1000
+        media_anual_tese = total_evitado_tese_tco2eq / anos_simulacao
+        
+        # Metodologia UNFCCC (Compostagem Termofílica)
+        total_evitado_unfccc_kg = (total_aterro_cont - total_compost_cont) * GWP_CH4
+        total_evitado_unfccc_tco2eq = total_evitado_unfccc_kg / 1000
+        media_anual_unfccc = total_evitado_unfccc_tco2eq / anos_simulacao
+        
+        # Layout com duas colunas
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 📋 Metodologia da Tese (Vermicompostagem)")
+            st.metric(
+                "Total de emissões evitadas", 
+                f"{formatar_br(total_evitado_tese_tco2eq)} tCO₂eq",
+                help=f"Total acumulado em {anos_simulacao} anos"
+            )
+            st.metric(
+                "Média anual", 
+                f"{formatar_br(media_anual_tese)} tCO₂eq/ano",
+                help=f"Emissões evitadas por ano em média"
+            )
+        
+        with col2:
+            st.markdown("#### 📋 Metodologia UNFCCC (Compostagem Termofílica)")
+            st.metric(
+                "Total de emissões evitadas", 
+                f"{formatar_br(total_evitado_unfccc_tco2eq)} tCO₂eq",
+                help=f"Total acumulado em {anos_simulacao} anos"
+            )
+            st.metric(
+                "Média anual", 
+                f"{formatar_br(media_anual_unfccc)} tCO₂eq/ano",
+                help=f"Emissões evitadas por ano em média"
+            )
+        
+        # Comparação percentual
+        diferenca_absoluta = total_evitado_tese_tco2eq - total_evitado_unfccc_tco2eq
+        diferenca_percentual = (diferenca_absoluta / total_evitado_unfccc_tco2eq * 100) if total_evitado_unfccc_tco2eq > 0 else 0
+        
+        st.caption(f"""
+        📈 **Comparação:** A metodologia da Tese (Vermicompostagem) evita **{formatar_br(diferenca_absoluta)} tCO₂eq** 
+        ({diferenca_percentual:+.2f}%) a mais que a metodologia UNFCCC em {anos_simulacao} anos.
+        """)
+        
+        # Adicionar explicação sobre as metodologias
+        with st.expander("🔍 Entenda as Metodologias", expanded=False):
+            st.markdown(f"""
+            **📋 Metodologia da Tese (Vermicompostagem em Reatores):**
+            
+            **Base Científica:**
+            - **Fonte:** Yang et al. (2017) - Greenhouse gas emissions during MSW landfilling in China
+            - **CH₄_C_FRAC:** 0.13% do Carbono Orgânico Total (TOC) emitido como CH₄-C
+            - **Perfil Temporal:** 50 dias com distribuição específica para vermicompostagem
+            - **Processo:** Compostagem acelerada com minhocas (Eisenia fetida) em reatores controlados
+            
+            **Cálculo do Metano:**
+            ```
+            CH₄_total = Resíduos × TOC × CH₄_C_FRAC × (16/12) × (1 - Umidade)
+            CH₄_total = {residuos_kg_dia} kg/dia × 0.436 × 0.0013 × 1.333 × (1 - {umidade:.3f})
+            CH₄_total = {formatar_br(media_anual_vermi)} kg CH₄/ano (média)
+            ```
+            
+            **📋 Metodologia UNFCCC (Compostagem Termofílica a Céu Aberto):**
+            
+            **Base Científica:**
+            - **Fonte:** UNFCCC (2016) - Clean Development Mechanism - Methodology AMS-III.F
+            - **CH₄_C_FRAC:** 0.6% do Carbono Orgânico Total (TOC) emitido como CH₄-C
+            - **Perfil Temporal:** 50 dias com pico termofílico
+            - **Processo:** Compostagem tradicional sem minhocas, em leiras a céu aberto
+            
+            **Cálculo do Metano:**
+            ```
+            CH₄_total = Resíduos × TOC × CH₄_C_FRAC × (16/12) × (1 - Umidade)
+            CH₄_total = {residuos_kg_dia} kg/dia × 0.436 × 0.006 × 1.333 × (1 - {umidade:.3f})
+            CH₄_total = {formatar_br(media_anual_compost)} kg CH₄/ano (média)
+            ```
+            
+            **🌍 Conversão para CO₂eq:**
+            ```
+            CO₂eq = CH₄ (kg) × GWP_CH₄ (27.9) ÷ 1000
+            GWP_CH₄ = 27.9 kg CO₂eq/kg CH₄ (IPCC AR6, 100 anos)
+            ```
+            
+            **⚖️ Por que a diferença?**
+            - **Vermicompostagem:** Processo mais controlado, menor produção de metano (0.13% vs 0.6%)
+            - **Compostagem tradicional:** Maior temperatura, condições mais favoráveis à metanogênese
+            - **Eficiência:** As minhocas aceleram a decomposição aeróbica, reduzindo condições anaeróbicas
+            
+            **📊 Resumo dos Parâmetros:**
+            - **Resíduos processados:** {residuos_kg_dia} kg/dia = {formatar_br(residuos_kg_dia * 365 / 1000)} ton/ano
+            - **Período:** {anos_simulacao} anos ({dias_total} dias)
+            - **Umidade:** {umidade_valor}%
+            - **Temperatura:** {temperatura}°C
+            - **GWP CH₄:** 27.9 kg CO₂eq/kg CH₄
+            """)
+        
+        # =====================================================================
+        # 8. GRÁFICO: EMISSÕES EVITADAS ANUAIS (tCO₂eq) - NOVO GRÁFICO
+        # =====================================================================
+        
+        st.subheader("📈 Emissões Evitadas Anuais (tCO₂eq)")
+        
+        # Calcular emissões evitadas anuais em tCO₂eq
+        df_anual['Evitado_Tese_tCO2eq'] = (df_anual['Aterro_CH4_kg_dia'] - df_anual['Vermicompostagem_CH4_kg_dia']) * GWP_CH4 / 1000
+        df_anual['Evitado_UNFCCC_tCO2eq'] = (df_anual['Aterro_CH4_kg_dia'] - df_anual['Compostagem_CH4_kg_dia']) * GWP_CH4 / 1000
+        
+        # Calcular acumulado
+        df_anual['Acumulado_Tese'] = df_anual['Evitado_Tese_tCO2eq'].cumsum()
+        df_anual['Acumulado_UNFCCC'] = df_anual['Evitado_UNFCCC_tCO2eq'].cumsum()
+        
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10))
+        
+        # Gráfico 1: Emissões evitadas anuais
+        x_pos = np.arange(len(df_anual['Ano']))
+        bar_width = 0.35
+        
+        bars1 = ax1.bar(x_pos - bar_width/2, df_anual['Evitado_Tese_tCO2eq'], bar_width,
+                        label='Metodologia da Tese', color='green', alpha=0.8, edgecolor='black')
+        bars2 = ax1.bar(x_pos + bar_width/2, df_anual['Evitado_UNFCCC_tCO2eq'], bar_width,
+                        label='Metodologia UNFCCC', color='blue', alpha=0.8, edgecolor='black', hatch='//')
+        
+        ax1.set_xlabel('Ano')
+        ax1.set_ylabel('Emissões Evitadas (tCO₂eq/ano)')
+        ax1.set_title(f'Emissões Evitadas Anuais - Comparação entre Metodologias ({anos_simulacao} anos)')
+        ax1.set_xticks(x_pos)
+        ax1.set_xticklabels(df_anual['Ano'])
+        ax1.legend(title='Metodologia')
+        ax1.yaxis.set_major_formatter(br_formatter)
+        ax1.grid(axis='y', linestyle='--', alpha=0.5)
+        
+        # Adicionar valores nas barras
+        for bars in [bars1, bars2]:
+            for bar in bars:
+                height = bar.get_height()
+                if height > 0:
+                    ax1.text(bar.get_x() + bar.get_width()/2., height + max(df_anual['Evitado_Tese_tCO2eq'].max(), 
+                             df_anual['Evitado_UNFCCC_tCO2eq'].max())*0.01,
+                             f'{height:,.1f}'.replace(',', 'X').replace('.', ',').replace('X', '.'),
+                             ha='center', va='bottom', fontsize=8, fontweight='bold')
+        
+        # Gráfico 2: Emissões evitadas acumuladas
+        ax2.plot(df_anual['Ano'], df_anual['Acumulado_Tese'], 'g-', 
+                 label='Metodologia da Tese (Acumulado)', linewidth=2.5, marker='o', markersize=6)
+        ax2.plot(df_anual['Ano'], df_anual['Acumulado_UNFCCC'], 'b-', 
+                 label='Metodologia UNFCCC (Acumulado)', linewidth=2.5, marker='s', markersize=6)
+        
+        # Área entre as curvas (diferença)
+        ax2.fill_between(df_anual['Ano'], df_anual['Acumulado_UNFCCC'], df_anual['Acumulado_Tese'],
+                         color='green', alpha=0.2, label='Diferença a favor da Tese')
+        
+        ax2.set_xlabel('Ano')
+        ax2.set_ylabel('Emissões Evitadas Acumuladas (tCO₂eq)')
+        ax2.set_title('Acumulado de Emissões Evitadas - Comparação entre Metodologias')
+        ax2.set_xticks(df_anual['Ano'])
+        ax2.legend(title='Metodologia', loc='upper left')
+        ax2.yaxis.set_major_formatter(br_formatter)
+        ax2.grid(True, linestyle='--', alpha=0.5)
+        
+        # Adicionar valores nos pontos do acumulado
+        for i, (tese, unfccc) in enumerate(zip(df_anual['Acumulado_Tese'], df_anual['Acumulado_UNFCCC'])):
+            ax2.text(df_anual['Ano'].iloc[i], tese + max(df_anual['Acumulado_Tese'].max(), 
+                     df_anual['Acumulado_UNFCCC'].max())*0.02,
+                     f'{tese:,.1f}'.replace(',', 'X').replace('.', ',').replace('X', '.'),
+                     ha='center', fontsize=8, fontweight='bold', color='green')
+            ax2.text(df_anual['Ano'].iloc[i], unfccc - max(df_anual['Acumulado_Tese'].max(), 
+                     df_anual['Acumulado_UNFCCC'].max())*0.02,
+                     f'{unfccc:,.1f}'.replace(',', 'X').replace('.', ',').replace('X', '.'),
+                     ha='center', fontsize=8, fontweight='bold', color='blue')
+        
+        plt.tight_layout()
+        st.pyplot(fig)
+        
+        # =====================================================================
+        # 9. TABELA DETALHADA DAS EMISSÕES EVITADAS
+        # =====================================================================
+        
+        with st.expander("📋 Tabela Detalhada das Emissões Evitadas por Ano", expanded=False):
+            # Criar DataFrame com todos os dados
+            tabela_detalhada = pd.DataFrame({
+                'Ano': df_anual['Ano'],
+                'Aterro_CH4_kg': df_anual['Aterro_CH4_kg_dia'],
+                'Vermicompostagem_CH4_kg': df_anual['Vermicompostagem_CH4_kg_dia'],
+                'Compostagem_CH4_kg': df_anual['Compostagem_CH4_kg_dia'],
+                'Redução_Vermi_kg': df_anual['Aterro_CH4_kg_dia'] - df_anual['Vermicompostagem_CH4_kg_dia'],
+                'Redução_Compost_kg': df_anual['Aterro_CH4_kg_dia'] - df_anual['Compostagem_CH4_kg_dia'],
+                'Redução_Vermi_tCO2eq': df_anual['Evitado_Tese_tCO2eq'],
+                'Redução_Compost_tCO2eq': df_anual['Evitado_UNFCCC_tCO2eq'],
+                'Acumulado_Tese_tCO2eq': df_anual['Acumulado_Tese'],
+                'Acumulado_UNFCCC_tCO2eq': df_anual['Acumulado_UNFCCC']
+            })
+            
+            # Formatar os números
+            for col in tabela_detalhada.columns:
+                if col != 'Ano':
+                    tabela_detalhada[col] = tabela_detalhada[col].apply(lambda x: formatar_br(x) if not pd.isna(x) else "N/A")
+            
+            st.dataframe(tabela_detalhada, use_container_width=True)
+            
+            # Botão para download
+            csv = tabela_detalhada.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download da Tabela (CSV)",
+                data=csv,
+                file_name=f"emissoes_evitadas_{residuos_kg_dia}kg_{anos_simulacao}anos.csv",
+                mime="text/csv",
+            )
+        
+        # =====================================================================
+        # 10. ANÁLISE FINANCEIRA PARA ENTRADA CONTÍNUA
         # =====================================================================
         
         st.header("💰 Análise Financeira - Entrada Contínua")
         
         # Converter metano para CO₂eq (GWP CH₄ = 27.9 para 100 anos - IPCC AR6)
-        GWP_CH4 = 27.9  # kg CO₂eq por kg CH₄
+        # Nota: Já temos essas variáveis da seção anterior
+        # total_evitado_tese_tco2eq e total_evitado_unfccc_tco2eq
         
-        total_evitado_vermi_kg = (total_aterro_cont - total_vermi_cont) * GWP_CH4
-        total_evitado_vermi_tco2eq = total_evitado_vermi_kg / 1000
-        
-        total_evitado_compost_kg = (total_aterro_cont - total_compost_cont) * GWP_CH4
-        total_evitado_compost_tco2eq = total_evitado_compost_kg / 1000
-        
-        # Simular cenários financeiros
-        cenarios_vermi = simular_cenarios_financeiros(
-            total_evitado_vermi_tco2eq, 
+        # Simular cenários financeiros para ambas metodologias
+        cenarios_tese = simular_cenarios_financeiros(
+            total_evitado_tese_tco2eq, 
             st.session_state.preco_carbono,
             st.session_state.taxa_cambio
         )
         
-        cenarios_compost = simular_cenarios_financeiros(
-            total_evitado_compost_tco2eq,
+        cenarios_unfccc = simular_cenarios_financeiros(
+            total_evitado_unfccc_tco2eq,
             st.session_state.preco_carbono,
             st.session_state.taxa_cambio
         )
         
-        # Exibir métricas de CO₂eq
-        st.subheader("🌍 Impacto Total em CO₂eq (20 anos)")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.metric(
-                "Vermicompostagem",
-                f"{formatar_br(total_evitado_vermi_tco2eq)} tCO₂eq",
-                help=f"Total evitado em {anos_simulacao} anos"
-            )
-        
-        with col2:
-            st.metric(
-                "Compostagem",
-                f"{formatar_br(total_evitado_compost_tco2eq)} tCO₂eq",
-                help=f"Total evitado em {anos_simulacao} anos"
-            )
-        
-        # Métricas anuais de CO₂eq
-        st.subheader("📊 Impacto Anual em CO₂eq")
+        # Exibir métricas financeiras
+        st.subheader("🌍 Valor Financeiro das Emissões Evitadas")
         
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            media_anual_vermi_co2 = total_evitado_vermi_tco2eq / anos_simulacao
             st.metric(
-                "Vermicompostagem (média anual)",
-                f"{formatar_br(media_anual_vermi_co2)} tCO₂eq/ano",
-                help="Redução média anual"
+                "Preço do Carbono",
+                f"€{st.session_state.preco_carbono:.2f}/tCO₂eq",
+                help=f"Fonte: {st.session_state.fonte_cotacao}"
             )
         
         with col2:
-            media_anual_compost_co2 = total_evitado_compost_tco2eq / anos_simulacao
+            valor_tese_eur = total_evitado_tese_tco2eq * st.session_state.preco_carbono
+            valor_tese_brl = valor_tese_eur * st.session_state.taxa_cambio
             st.metric(
-                "Compostagem (média anual)",
-                f"{formatar_br(media_anual_compost_co2)} tCO₂eq/ano",
-                help="Redução média anual"
+                "Valor Tese (20 anos)",
+                f"R$ {formatar_br(valor_tese_brl)}",
+                help=f"€{formatar_br(valor_tese_eur)} em Euros"
             )
         
         with col3:
-            diferenca_percentual = ((total_evitado_vermi_tco2eq - total_evitado_compost_tco2eq) / total_evitado_compost_tco2eq * 100) if total_evitado_compost_tco2eq > 0 else 0
+            valor_unfccc_eur = total_evitado_unfccc_tco2eq * st.session_state.preco_carbono
+            valor_unfccc_brl = valor_unfccc_eur * st.session_state.taxa_cambio
             st.metric(
-                "Diferença",
-                f"{diferenca_percentual:+.2f}%",
-                help="Vermicompostagem vs Compostagem"
+                "Valor UNFCCC (20 anos)",
+                f"R$ {formatar_br(valor_unfccc_brl)}",
+                help=f"€{formatar_br(valor_unfccc_eur)} em Euros"
             )
         
         # Tabela comparativa de cenários financeiros
@@ -1326,18 +1524,52 @@ elif st.session_state.get('run_continuous_simulation', False) and tipo_simulacao
         for cenario in ['Otimista (Mercado Regulado)', 'Base (Mercado Voluntário)', 'Pessimista (Sem Créditos)']:
             dados_comparativos.append({
                 'Cenário': cenario,
-                'Descrição': cenarios_vermi[cenario]['descricao'],
-                'Vermicompostagem (R$)': formatar_br(cenarios_vermi[cenario]['valor_total']),
-                'Compostagem (R$)': formatar_br(cenarios_compost[cenario]['valor_total']),
-                'Diferença (R$)': formatar_br(cenarios_vermi[cenario]['valor_total'] - cenarios_compost[cenario]['valor_total']),
-                'Valor Anual (R$/ano)': formatar_br(cenarios_vermi[cenario]['valor_total'] / anos_simulacao)
+                'Descrição': cenarios_tese[cenario]['descricao'],
+                'Metodologia Tese (R$)': formatar_br(cenarios_tese[cenario]['valor_total']),
+                'Metodologia UNFCCC (R$)': formatar_br(cenarios_unfccc[cenario]['valor_total']),
+                'Diferença (R$)': formatar_br(cenarios_tese[cenario]['valor_total'] - cenarios_unfccc[cenario]['valor_total']),
+                'Valor Anual Tese (R$/ano)': formatar_br(cenarios_tese[cenario]['valor_total'] / anos_simulacao)
             })
         
         df_comparativo = pd.DataFrame(dados_comparativos)
         st.dataframe(df_comparativo, use_container_width=True)
         
+        # Gráfico de barras comparativo
+        fig, ax = plt.subplots(figsize=(12, 7))
+        
+        cenarios_nomes = list(cenarios_tese.keys())
+        valores_tese = [cenarios_tese[c]['valor_total'] for c in cenarios_nomes]
+        valores_unfccc = [cenarios_unfccc[c]['valor_total'] for c in cenarios_nomes]
+        
+        x = np.arange(len(cenarios_nomes))
+        width = 0.35
+        
+        ax.bar(x - width/2, valores_tese, width, label='Metodologia da Tese', color='green', alpha=0.8)
+        ax.bar(x + width/2, valores_unfccc, width, label='Metodologia UNFCCC', color='blue', alpha=0.8)
+        
+        ax.set_xlabel('Cenário Financeiro')
+        ax.set_ylabel('Valor Financeiro (R$)')
+        ax.set_title(f'Valor dos Créditos de Carbono por Cenário ({anos_simulacao} anos)')
+        ax.set_xticks(x)
+        ax.set_xticklabels([c.split('(')[0].strip() for c in cenarios_nomes])
+        ax.legend()
+        ax.yaxis.set_major_formatter(br_formatter)
+        ax.grid(axis='y', linestyle='--', alpha=0.7)
+        
+        # Adicionar valores nas barras
+        for i, (v1, v2) in enumerate(zip(valores_tese, valores_unfccc)):
+            if v1 > 0:
+                ax.text(i - width/2, v1 + max(v1, v2)*0.01, f'R${v1:,.0f}', 
+                       ha='center', fontsize=9, fontweight='bold')
+            if v2 > 0:
+                ax.text(i + width/2, v2 + max(v1, v2)*0.01, f'R${v2:,.0f}', 
+                       ha='center', fontsize=9, fontweight='bold')
+        
+        plt.tight_layout()
+        st.pyplot(fig)
+        
         # =====================================================================
-        # 8. RESUMO DETALHADO - ENTRADA CONTÍNUA
+        # 11. RESUMO DETALHADO - ENTRADA CONTÍNUA
         # =====================================================================
         
         with st.expander("📋 Resumo Detalhado da Análise - Entrada Contínua", expanded=False):
@@ -1361,34 +1593,40 @@ elif st.session_state.get('run_continuous_simulation', False) and tipo_simulacao
             - **Compostagem:** {formatar_br(total_aterro_cont - total_compost_cont)} kg CH₄ ({formatar_br(reducao_compost_perc)}%)
             
             **Em CO₂eq Evitadas ({anos_simulacao} anos):**
-            - **Vermicompostagem:** {formatar_br(total_evitado_vermi_tco2eq)} tCO₂eq
-            - **Compostagem:** {formatar_br(total_evitado_compost_tco2eq)} tCO₂eq
+            - **Metodologia da Tese:** {formatar_br(total_evitado_tese_tco2eq)} tCO₂eq
+            - **Metodologia UNFCCC:** {formatar_br(total_evitado_unfccc_tco2eq)} tCO₂eq
             - **Diferença:** {diferenca_percentual:+.2f}%
             
             **Métricas Anuais Médias:**
             - **Aterro:** {formatar_br(media_anual_aterro)} kg CH₄/ano
             - **Vermicompostagem:** {formatar_br(media_anual_vermi)} kg CH₄/ano
             - **Compostagem:** {formatar_br(media_anual_compost)} kg CH₄/ano
-            - **Redução Vermicompostagem:** {formatar_br(media_anual_vermi_co2)} tCO₂eq/ano
-            - **Redução Compostagem:** {formatar_br(media_anual_compost_co2)} tCO₂eq/ano
+            - **Redução Tese:** {formatar_br(media_anual_tese)} tCO₂eq/ano
+            - **Redução UNFCCC:** {formatar_br(media_anual_unfccc)} tCO₂eq/ano
             
             **Cenário Financeiro Mais Favorável (Regulado - {anos_simulacao} anos):**
-            - **Vermicompostagem:** R$ {formatar_br(cenarios_vermi['Otimista (Mercado Regulado)']['valor_total'])}
-            - **Compostagem:** R$ {formatar_br(cenarios_compost['Otimista (Mercado Regulado)']['valor_total'])}
+            - **Metodologia da Tese:** R$ {formatar_br(cenarios_tese['Otimista (Mercado Regulado)']['valor_total'])}
+            - **Metodologia UNFCCC:** R$ {formatar_br(cenarios_unfccc['Otimista (Mercado Regulado)']['valor_total'])}
             
             **Valor Anual Médio (Regulado):**
-            - **Vermicompostagem:** R$ {formatar_br(cenarios_vermi['Otimista (Mercado Regulado)']['valor_total'] / anos_simulacao)}/ano
-            - **Compostagem:** R$ {formatar_br(cenarios_compost['Otimista (Mercado Regulado)']['valor_total'] / anos_simulacao)}/ano
+            - **Metodologia da Tese:** R$ {formatar_br(cenarios_tese['Otimista (Mercado Regulado)']['valor_total'] / anos_simulacao)}/ano
+            - **Metodologia UNFCCC:** R$ {formatar_br(cenarios_unfccc['Otimista (Mercado Regulado)']['valor_total'] / anos_simulacao)}/ano
             
             **💡 Conclusão:**
             A simulação de entrada contínua mostra que, ao longo de {anos_simulacao} anos, a vermicompostagem 
             apresenta uma redução significativa de {formatar_br(reducao_vermi_perc)}% nas emissões de metano 
             em comparação com o aterro, enquanto a compostagem reduz {formatar_br(reducao_compost_perc)}%.
+            A metodologia da Tese (vermicompostagem) é {diferenca_percentual:+.2f}% mais eficiente que a 
+            metodologia UNFCCC em termos de redução de emissões.
             
             **⚖️ Viabilidade Financeira em Larga Escala:**
             - **Mercado Regulado:** Projeto altamente atrativo, com retorno financeiro significativo
             - **Mercado Voluntário:** Viabilidade moderada, pode ser complementado com outras receitas
             - **Sem Créditos:** Necessidade de políticas públicas ou incentivos para viabilizar
+            
+            **📊 Recomendação:**
+            A vermicompostagem em reatores apresenta melhor desempenho ambiental e maior potencial 
+            financeiro no mercado de carbono, especialmente no cenário regulado da UE.
             """)
 
 else:
@@ -1407,4 +1645,5 @@ st.markdown("""
 
 **🔧 Desenvolvido para análise comparativa de potenciais de metano em diferentes cenários de gestão de resíduos.**
 **🔄 Nova Funcionalidade: Simulação de entrada contínua (1 lote/dia por 20 anos) baseada no script v2n_noAr.**
+**📊 Nova Seção: Resumo das Emissões Evitadas com comparação entre Metodologia da Tese e UNFCCC.**
 """)

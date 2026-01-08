@@ -139,15 +139,25 @@ def calcular_potencial_metano_aterro(residuos_kg, umidade, temperatura, dias=365
     # Potencial total do lote
     potencial_CH4_total = residuos_kg * potencial_CH4_por_kg
     
-    # Perfil temporal de decaimento (primeira ordem)
-    k_ano = 0.06  # Constante de decaimento anual
+    # CORREÇÃO: Taxa de decaimento anual convertida para diária
+    k_ano = 0.06  # Constante de decaimento anual (6% ao ano)
+    k_dia = k_ano / 365.0  # Taxa de decaimento diária
     
     # Gerar emissões ao longo do tempo
     t = np.arange(1, dias + 1, dtype=float)
-    kernel_ch4 = np.exp(-k_ano * (t - 1) / 365.0) - np.exp(-k_ano * t / 365.0)
+    
+    # CORREÇÃO: Usar k_dia no cálculo do kernel
+    kernel_ch4 = np.exp(-k_dia * (t - 1)) - np.exp(-k_dia * t)
+    
+    # Garantir que não há valores negativos (pode ocorrer por erro numérico)
+    kernel_ch4 = np.maximum(kernel_ch4, 0)
     
     # Normalizar o kernel para que a soma seja 1
-    kernel_ch4 = kernel_ch4 / kernel_ch4.sum()
+    if kernel_ch4.sum() > 0:
+        kernel_ch4 = kernel_ch4 / kernel_ch4.sum()
+    else:
+        # Fallback: distribuição uniforme se o cálculo falhar
+        kernel_ch4 = np.ones(dias) / dias
     
     # Distribuir o potencial total ao longo do tempo
     emissoes_CH4 = potencial_CH4_total * kernel_ch4
@@ -244,10 +254,17 @@ def calcular_emissoes_aterro_completo_continuo(residuos_kg_dia, umidade, tempera
     potencial_CH4_por_kg = doc_val * DOCf * MCF * F * (16/12) * (1 - Ri) * (1 - OX)
     potencial_CH4_lote_diario = residuos_kg_dia * potencial_CH4_por_kg
     
-    # Perfil temporal de decaimento
+    # CORREÇÃO: Perfil temporal de decaimento
+    k_dia = k_ano / 365.0  # Taxa de decaimento diária
+    
     t = np.arange(1, dias_simulacao + 1, dtype=float)
-    kernel_ch4 = np.exp(-k_ano * (t - 1) / 365.0) - np.exp(-k_ano * t / 365.0)
-    kernel_ch4 = kernel_ch4 / kernel_ch4.sum()  # Normalizar
+    kernel_ch4 = np.exp(-k_dia * (t - 1)) - np.exp(-k_dia * t)
+    kernel_ch4 = np.maximum(kernel_ch4, 0)
+    
+    if kernel_ch4.sum() > 0:
+        kernel_ch4 = kernel_ch4 / kernel_ch4.sum()  # Normalizar
+    else:
+        kernel_ch4 = np.ones(dias_simulacao) / dias_simulacao
     
     entradas_diarias = np.ones(dias_simulacao, dtype=float)
     emissoes_CH4 = np.convolve(entradas_diarias, kernel_ch4, mode='full')[:dias_simulacao]

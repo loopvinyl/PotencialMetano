@@ -118,7 +118,7 @@ def obter_cotacao_euro_real():
 # FUNÇÕES PARA ANÁLISE POR LOTE (100 kg) - ABA 1 (CORRIGIDAS)
 # =============================================================================
 
-def calcular_potencial_metano_aterro(residuos_kg, umidade, temperatura, k_ano, dias=365):
+def calcular_potencial_metano_aterro(residuos_kg, umidade, temperatura, dias=365):
     """
     Calcula o potencial de geração de metano de um lote de resíduos no aterro
     Baseado na metodologia IPCC 2006 - CORRIGIDO: Kernel NÃO normalizado
@@ -139,7 +139,8 @@ def calcular_potencial_metano_aterro(residuos_kg, umidade, temperatura, k_ano, d
     # Potencial total do lote
     potencial_CH4_total = residuos_kg * potencial_CH4_por_kg
     
-    # MODIFICAÇÃO: Taxa de decaimento anual agora é um parâmetro
+    # CORREÇÃO: Taxa de decaimento anual
+    k_ano = 0.06  # Constante de decaimento anual (6% ao ano)
     k_dia = k_ano / 365.0  # Taxa de decaimento diária
     
     # Gerar emissões ao longo do tempo
@@ -200,7 +201,7 @@ def calcular_emissoes_compostagem(residuos_kg, umidade, dias=50):
     """
     Calcula emissões de metano na compostagem termofílica (Yang et al. 2017)
     """
-    # Parámetros fixos para compostagem termofílica
+    # Parâmetros fixos para compostagem termofílica
     TOC = 0.436  # Fração de carbono orgânico total
     CH4_C_FRAC = 0.006  # Fração do TOC emitida como CH4-C (0.6%)
     fracao_ms = 1 - umidade  # Fração de matéria seca
@@ -235,7 +236,7 @@ def calcular_emissoes_compostagem(residuos_kg, umidade, dias=50):
 # =============================================================================
 
 def calcular_emissoes_aterro_completo_continuo(residuos_kg_dia, umidade, temperatura, doc_val, 
-                                               massa_exposta_kg, h_exposta, dias_simulacao, k_ano):
+                                               massa_exposta_kg, h_exposta, dias_simulacao):
     """
     Calcula CH₄ + N₂O do aterro para entrada contínua
     Baseado no Script 2 (Zziwa et al. adaptado) - CORRIGIDO: Kernel NÃO normalizado
@@ -245,7 +246,7 @@ def calcular_emissoes_aterro_completo_continuo(residuos_kg_dia, umidade, tempera
     F = 0.5
     OX = 0.1
     Ri = 0.0
-    # MODIFICAÇÃO: k_ano agora é um parâmetro da função
+    k_ano = 0.06
     
     # 1. CÁLCULO DE CH₄ (METANO)
     DOCf = 0.0147 * temperatura + 0.28
@@ -470,10 +471,6 @@ def inicializar_session_state():
         st.session_state.run_simulation = False
     if 'run_simulacao_continuo' not in st.session_state:
         st.session_state.run_simulacao_continuo = False
-    if 'k_lote' not in st.session_state:
-        st.session_state.k_lote = 0.06  # Valor padrão para aba 1
-    if 'k_continuo' not in st.session_state:
-        st.session_state.k_continuo = 0.06  # Valor padrão para aba 2
 
 # =============================================================================
 # EXIBIR COTAÇÃO DO CARBONO NO PAINEL LATERAL
@@ -591,17 +588,6 @@ with tab1:
             key="temp_lote"
         )
         
-        # ADICIONADO: Slider para taxa de decaimento (k) - ABA 1
-        st.subheader("📉 Parâmetros de Degradação do Aterro")
-        k_ano_lote = st.slider(
-            "Taxa de Decaimento (k) [ano⁻¹] - Lote", 
-            0.01, 0.50, st.session_state.k_lote, 0.01,
-            help="Taxa de decaimento anual para a degradação dos resíduos no aterro",
-            key="k_lote_slider"
-        )
-        st.session_state.k_lote = k_ano_lote
-        st.write(f"**Taxa de decaimento selecionada:** {formatar_br(k_ano_lote)} ano⁻¹")
-        
         st.subheader("⏰ Período de Análise")
         dias_simulacao = st.slider(
             "Dias de simulação", 
@@ -612,16 +598,15 @@ with tab1:
         
         # Adicionar aviso sobre método correto
         with st.expander("ℹ️ Informação sobre Metodologia"):
-            st.info(f"""
+            st.info("""
             **Método Corrigido (IPCC 2006):**
             - **Aterro:** Kernel NÃO normalizado - respeita a equação diferencial do decaimento
-            - **Taxa de decaimento (k):** {formatar_br(k_ano_lote)} ano⁻¹
             - **Compostagem/Vermicompostagem:** Kernel normalizado - processos curtos (<50 dias)
             
-            **Para 100 kg × 365 dias com k={formatar_br(k_ano_lote)}:**
+            **Para 100 kg × 365 dias:**
             - Potencial total CH₄: ~5.83 kg
-            - Fração emitida em 365 dias: ~{formatar_br(k_ano_lote*100)}%
-            - CH₄ emitido no período: ~{formatar_br(5.83 * k_ano_lote)} kg
+            - Fração emitida em 365 dias: ~6%
+            - CH₄ emitido no período: ~0.35 kg
             """)
         
         if st.button("🚀 Calcular Potencial de Metano", type="primary", key="btn_lote"):
@@ -634,7 +619,7 @@ with tab1:
             # 1. CÁLCULO DO POTENCIAL DE METANO PARA CADA CENÁRIO
             # Aterro Sanitário (CORRIGIDO)
             emissoes_aterro, total_aterro, DOCf, fracao_emitida = calcular_potencial_metano_aterro(
-                residuos_kg, umidade, temperatura, st.session_state.k_lote, dias_simulacao
+                residuos_kg, umidade, temperatura, dias_simulacao
             )
             
             # Vermicompostagem (50 dias de processo)
@@ -678,7 +663,6 @@ with tab1:
             # Informação sobre metodologia
             st.info(f"""
             **📈 Método Corrigido (Kernel NÃO normalizado):**
-            - **Taxa de decaimento (k):** {formatar_br(st.session_state.k_lote)} ano⁻¹
             - Potencial total de CH₄ no aterro: **{formatar_br(total_aterro)} kg**
             - Fração emitida em {dias_simulacao} dias: **{formatar_br(fracao_emitida*100)}%**
             - CH₄ realmente emitido no período: **{formatar_br(df['Aterro_Acumulado'].iloc[-1])} kg**
@@ -740,7 +724,7 @@ with tab1:
                             color='blue', alpha=0.2, label='Redução Compostagem')
             
             # Configurar gráfico
-            ax.set_title(f'Acumulado de Metano em {dias_simulacao} Dias - Lote de {residuos_kg} kg (k={formatar_br(st.session_state.k_lote)} ano⁻¹)', 
+            ax.set_title(f'Acumulado de Metano em {dias_simulacao} Dias - Lote de {residuos_kg} kg (Método Corrigido)', 
                         fontsize=14, fontweight='bold')
             ax.set_xlabel('Data')
             ax.set_ylabel('Metano Acumulado (kg CH₄)')
@@ -776,7 +760,7 @@ with tab1:
             
             ax.set_xlabel('Dias')
             ax.set_ylabel('Metano (kg CH₄/dia)')
-            ax.set_title(f'Emissões Diárias de Metano (Primeiros {dias_exibir} Dias) - k={formatar_br(st.session_state.k_lote)} ano⁻¹', 
+            ax.set_title(f'Emissões Diárias de Metano (Primeiros {dias_exibir} Dias) - Método Corrigido', 
                         fontsize=14, fontweight='bold')
             ax.legend(title='Cenário')
             ax.grid(True, linestyle='--', alpha=0.5, axis='y')
@@ -901,17 +885,6 @@ with tab2:
             key="horas_expostas"
         )
         
-        # ADICIONADO: Slider para taxa de decaimento (k) - ABA 2
-        st.subheader("📉 Parâmetros de Degradação do Aterro")
-        k_ano_continuo = st.slider(
-            "Taxa de Decaimento (k) [ano⁻¹] - Contínuo", 
-            0.01, 0.50, st.session_state.k_continuo, 0.01,
-            help="Taxa de decaimento anual para a degradação dos resíduos no aterro",
-            key="k_continuo_slider"
-        )
-        st.session_state.k_continuo = k_ano_continuo
-        st.write(f"**Taxa de decaimento selecionada:** {formatar_br(k_ano_continuo)} ano⁻¹")
-        
         st.subheader("⏰ Período de Análise")
         anos_simulacao_cont = st.slider(
             "Anos de simulação - Contínuo", 
@@ -924,16 +897,15 @@ with tab2:
         
         # Adicionar aviso sobre método correto
         with st.expander("ℹ️ Comparação com Script 2 (Apêndice F)"):
-            st.info(f"""
+            st.info("""
             **Método Corrigido (igual ao Apêndice F):**
-            - **Aterro:** Kernel NÃO normalizado (k={formatar_br(k_ano_continuo)}/ano)
+            - **Aterro:** Kernel NÃO normalizado (k=0.06/ano)
             - **Processos de compostagem:** Perfis normalizados (50 dias)
             - **GWP:** 20 anos (CH₄=79.7, N₂O=273)
             
-            **Para 100 kg/dia × 20 anos com k={formatar_br(k_ano_continuo)}:**
-            - Fração total de CH₄ emitida: ~{formatar_br(k_ano_continuo*100)}%
-            - Esperado: ~1,405 tCO₂eq evitados (vermicompostagem) * ajustado por k
-            - Comparável à Tabela 18 do Script 2 (com k=0.06)
+            **Para 100 kg/dia × 20 anos:**
+            - Esperado: ~1,405 tCO₂eq evitados (vermicompostagem)
+            - Comparável à Tabela 18 do Script 2
             """)
         
         if st.button("🚀 Calcular Emissões Contínuas", type="primary", key="btn_continuo"):
@@ -947,7 +919,7 @@ with tab2:
             # Aterro (CORRIGIDO)
             ch4_aterro, n2o_aterro, DOCf, fracao_ch4_emitida = calcular_emissoes_aterro_completo_continuo(
                 residuos_kg_dia, umidade_cont, temperatura_cont, doc_val,
-                massa_exposta_kg, h_exposta, dias_simulacao_cont, st.session_state.k_continuo
+                massa_exposta_kg, h_exposta, dias_simulacao_cont
             )
             
             # Vermicompostagem
@@ -1036,10 +1008,9 @@ with tab2:
             # Informação sobre metodologia
             st.success(f"""
             **✅ Método Corrigido (Kernel NÃO normalizado):**
-            - **Taxa de decaimento (k):** {formatar_br(st.session_state.k_continuo)} ano⁻¹
             - Fração total de CH₄ emitida em {anos_simulacao_cont} anos: **{formatar_br(fracao_ch4_emitida*100)}%**
-            - Potencial total de CH₄: **{formatar_br(dias_simulacao_cont * residuos_kg_dia * 0.05828 / 1000)} ton** (cálculo simplificado)
-            - Metodologia igual ao Script 2 (Apêndice F) com k ajustável
+            - Potencial total de CH₄: **{formatar_br(dias_simulacao_cont * 100 * 0.05828 / 1000)} ton** (cálculo simplificado)
+            - Metodologia igual ao Script 2 (Apêndice F)
             """)
             
             # Totais acumulados
@@ -1058,7 +1029,7 @@ with tab2:
                 st.metric(
                     "Total de emissões evitadas",
                     f"{formatar_br(total_evitado_vermi)} tCO₂eq",
-                    help=f"Acumulado em {anos_simulacao_cont} anos (k={formatar_br(st.session_state.k_continuo)} ano⁻¹)"
+                    help=f"Acumulado em {anos_simulacao_cont} anos"
                 )
                 st.metric(
                     "Média anual",
@@ -1071,7 +1042,7 @@ with tab2:
                 st.metric(
                     "Total de emissões evitadas",
                     f"{formatar_br(total_evitado_compost)} tCO₂eq",
-                    help=f"Acumulado em {anos_simulacao_cont} anos (k={formatar_br(st.session_state.k_continuo)} ano⁻¹)"
+                    help=f"Acumulado em {anos_simulacao_cont} anos"
                 )
                 st.metric(
                     "Média anual",
@@ -1085,7 +1056,6 @@ with tab2:
             st.info(f"""
             **📈 Comparação:** A vermicompostagem evita **{dif_percentual:+.1f}%** mais emissões 
             que a compostagem termofílica ({formatar_br(total_evitado_vermi - total_evitado_compost)} tCO₂eq de diferença).
-            **Taxa de decaimento (k):** {formatar_br(st.session_state.k_continuo)} ano⁻¹
             """)
             
             # 6. GRÁFICO DE REDUÇÃO ACUMULADA
@@ -1110,7 +1080,7 @@ with tab2:
                            df_continuo['Total_Aterro_tCO2eq_acum'],
                            color='blue', alpha=0.1, label='Redução Compostagem')
             
-            ax.set_title(f'Emissões Acumuladas - {residuos_kg_dia} kg/dia × {anos_simulacao_cont} anos (k={formatar_br(st.session_state.k_continuo)} ano⁻¹)', 
+            ax.set_title(f'Emissões Acumuladas - {residuos_kg_dia} kg/dia × {anos_simulacao_cont} anos (Método Corrigido)', 
                         fontsize=14, fontweight='bold')
             ax.set_xlabel('Data')
             ax.set_ylabel('tCO₂eq Acumulado')
@@ -1133,25 +1103,24 @@ with tab2:
                 st.success(f"""
                 **✅ Resultado Comparável ao Script 2 (Tabela 18):**
                 
-                Sua simulação ({residuos_kg_dia} kg/dia × {anos_simulacao_cont} anos) com k={formatar_br(st.session_state.k_continuo)} ano⁻¹
-                é comparável aos resultados do Script 2 que usam **k=0.06** e mostram **1.405,87 tCO₂eq** para vermicompostagem.
+                Sua simulação ({residuos_kg_dia} kg/dia × {anos_simulacao_cont} anos) é diretamente comparável 
+                aos resultados do Script 2 que mostram **1.405,87 tCO₂eq** para vermicompostagem.
                 
-                **Seu resultado (k={formatar_br(st.session_state.k_continuo)}):** {formatar_br(total_evitado_vermi)} tCO₂eq
-                **Resultado Script 2 (k=0.06):** 1.405,87 tCO₂eq
+                **Seu resultado (Método Corrigido):** {formatar_br(total_evitado_vermi)} tCO₂eq
                 **Diferença:** {formatar_br(total_evitado_vermi - 1405.87)} tCO₂eq ({((total_evitado_vermi - 1405.87)/1405.87*100):+.1f}%)
                 
-                *Nota: Diferenças são esperadas devido ao k ajustado e variações nos parâmetros ambientais.*
+                *Nota: Pequenas diferenças são esperadas devido a variações nos parâmetros ambientais.*
                 """)
             else:
                 st.info(f"""
                 **📊 Para comparação com o Script 2 (Tabela 18):**
                 
-                O Script 2 mostra **1.405,87 tCO₂eq** para 100 kg/dia × 20 anos com vermicompostagem e **k=0.06**.
+                O Script 2 mostra **1.405,87 tCO₂eq** para 100 kg/dia × 20 anos com vermicompostagem.
                 
-                **Sua simulação atual (k={formatar_br(st.session_state.k_continuo)}):** {formatar_br(total_evitado_vermi)} tCO₂eq
+                **Sua simulação atual (Método Corrigido):** {formatar_br(total_evitado_vermi)} tCO₂eq
                 **Escala:** {residuos_kg_dia} kg/dia × {anos_simulacao_cont} anos
                 
-                *Para comparar diretamente, configure: 100 kg/dia × 20 anos com k=0.06*
+                *Para comparar diretamente, configure: 100 kg/dia × 20 anos*
                 """)
 
 # =============================================================================
@@ -1166,6 +1135,5 @@ st.markdown("""
 - EU ETS Market Data (2024). European Carbon Futures
 
 **🔧 Desenvolvido para análise comparativa de potenciais de metano em diferentes cenários de gestão de resíduos.**
-**✅ Método Corrigido: Kernel NÃO normalizado para aterro (metodologia IPCC correta) com k ajustável**
-**🎚️ Nova Funcionalidade: Taxa de decaimento (k) ajustável via slider para simulações personalizadas**
+**✅ Método Corrigido: Kernel NÃO normalizado para aterro (metodologia IPCC correta)**
 """)

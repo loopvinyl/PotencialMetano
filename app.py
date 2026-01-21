@@ -431,8 +431,24 @@ def formatar_br(numero):
     if pd.isna(numero):
         return "N/A"
     
-    numero = round(numero, 2)
-    return f"{numero:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    try:
+        # Verificar se o número é muito pequeno
+        if abs(numero) < 0.01 and numero != 0:
+            return f"{numero:.2e}".replace('.', ',')
+        
+        # Arredondar para 2 casas decimais
+        numero = round(numero, 2)
+        
+        # Formatar com separador de milhar e decimal
+        if numero == int(numero):
+            return f"{int(numero):,}".replace(",", ".")
+        else:
+            # Formatar com 2 casas decimais
+            formatted = f"{numero:,.2f}"
+            # Substituir vírgula por placeholder, ponto por vírgula, e placeholder por ponto
+            return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+    except (ValueError, TypeError):
+        return str(numero)
 
 def br_format(x, pos):
     """Função de formatação para eixos de gráficos (padrão brasileiro)"""
@@ -443,9 +459,14 @@ def br_format(x, pos):
         return f"{x:.1e}".replace(".", ",")
     
     if abs(x) >= 1000:
-        return f"{x:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        # Para números grandes, usar separador de milhar
+        return f"{x:,.0f}".replace(",", ".")
     
-    return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    # Para números com casas decimais
+    if x == int(x):
+        return f"{int(x):,}".replace(",", ".")
+    else:
+        return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 # =============================================================================
 # INICIALIZAÇÃO DA SESSION STATE
@@ -486,14 +507,14 @@ def exibir_cotacao_carbono():
     # Exibe cotação atual do carbono
     st.sidebar.metric(
         label=f"Preço do Carbono (tCO₂eq)",
-        value=f"{st.session_state.moeda_carbono} {st.session_state.preco_carbono:.2f}",
+        value=f"{st.session_state.moeda_carbono} {formatar_br(st.session_state.preco_carbono)}",
         help=f"Fonte: {st.session_state.fonte_cotacao}"
     )
     
     # Exibe cotação atual do Euro
     st.sidebar.metric(
         label="Euro (EUR/BRL)",
-        value=f"{st.session_state.moeda_real} {st.session_state.taxa_cambio:.2f}",
+        value=f"{st.session_state.moeda_real} {formatar_br(st.session_state.taxa_cambio)}",
         help="Cotação do Euro em Reais Brasileiros"
     )
     
@@ -502,7 +523,7 @@ def exibir_cotacao_carbono():
     
     st.sidebar.metric(
         label=f"Carbono em Reais (tCO₂eq)",
-        value=f"R$ {preco_carbono_reais:.2f}",
+        value=f"R$ {formatar_br(preco_carbono_reais)}",
         help="Preço do carbono convertido para Reais Brasileiros"
     )
     
@@ -511,13 +532,13 @@ def exibir_cotacao_carbono():
         st.markdown(f"""
         **📊 Cotações Atuais:**
         - **Fonte do Carbono:** {st.session_state.fonte_cotacao}
-        - **Preço Atual:** {st.session_state.moeda_carbono} {st.session_state.preco_carbono:.2f}/tCO₂eq
-        - **Câmbio EUR/BRL:** 1 Euro = R$ {st.session_state.taxa_cambio:.2f}
-        - **Carbono em Reais:** R$ {preco_carbono_reais:.2f}/tCO₂eq
+        - **Preço Atual:** {st.session_state.moeda_carbono} {formatar_br(st.session_state.preco_carbono)}/tCO₂eq
+        - **Câmbio EUR/BRL:** 1 Euro = R$ {formatar_br(st.session_state.taxa_cambio)}
+        - **Carbono em Reais:** R$ {formatar_br(preco_carbono_reais)}/tCO₂eq
         
         **🌍 Comparação de Mercados:**
-        - **Mercado Voluntário:** ~USD 7.48 ≈ R$ 37.40/tCO₂eq
-        - **Mercado Regulado (EU ETS):** ~€85.57 ≈ R$ 544.23/tCO₂eq
+        - **Mercado Voluntário:** ~USD 7,48 ≈ R$ 37,40/tCO₂eq
+        - **Mercado Regulado (EU ETS):** ~€85,57 ≈ R$ 544,23/tCO₂eq
         
         **💡 Importante:**
         - Os preços são baseados no mercado regulado da UE
@@ -619,7 +640,7 @@ with tab1:
             - **Compostagem/Vermicompostagem:** Kernel normalizado - processos curtos (<50 dias)
             
             **Para 100 kg × 365 dias com k={formatar_br(k_ano_lote)}:**
-            - Potencial total CH₄: ~5.83 kg
+            - Potencial total CH₄: ~5,83 kg
             - Fração emitida em 365 dias: ~{formatar_br(k_ano_lote*100)}%
             - CH₄ emitido no período: ~{formatar_br(5.83 * k_ano_lote)} kg
             """)
@@ -928,12 +949,12 @@ with tab2:
             **Método Corrigido (igual ao Apêndice F):**
             - **Aterro:** Kernel NÃO normalizado (k={formatar_br(k_ano_continuo)}/ano)
             - **Processos de compostagem:** Perfis normalizados (50 dias)
-            - **GWP:** 20 anos (CH₄=79.7, N₂O=273)
+            - **GWP:** 20 anos (CH₄=79,7, N₂O=273)
             
             **Para 100 kg/dia × 20 anos com k={formatar_br(k_ano_continuo)}:**
             - Fração total de CH₄ emitida: ~{formatar_br(k_ano_continuo*100)}%
-            - Esperado: ~1,405 tCO₂eq evitados (vermicompostagem) * ajustado por k
-            - Comparável à Tabela 18 do Script 2 (com k=0.06)
+            - Esperado: ~1.405,87 tCO₂eq evitados (vermicompostagem) * ajustado por k
+            - Comparável à Tabela 18 do Script 2 (com k=0,06)
             """)
         
         if st.button("🚀 Calcular Emissões Contínuas", type="primary", key="btn_continuo"):
@@ -1083,7 +1104,7 @@ with tab2:
             dif_percentual = ((total_evitado_vermi - total_evitado_compost) / total_evitado_compost * 100) if total_evitado_compost > 0 else 0
             
             st.info(f"""
-            **📈 Comparação:** A vermicompostagem evita **{dif_percentual:+.1f}%** mais emissões 
+            **📈 Comparação:** A vermicompostagem evita **{formatar_br(dif_percentual)}%** mais emissões 
             que a compostagem termofílica ({formatar_br(total_evitado_vermi - total_evitado_compost)} tCO₂eq de diferença).
             **Taxa de decaimento (k):** {formatar_br(st.session_state.k_continuo)} ano⁻¹
             """)
@@ -1134,11 +1155,11 @@ with tab2:
                 **✅ Resultado Comparável ao Script 2 (Tabela 18):**
                 
                 Sua simulação ({residuos_kg_dia} kg/dia × {anos_simulacao_cont} anos) com k={formatar_br(st.session_state.k_continuo)} ano⁻¹
-                é comparável aos resultados do Script 2 que usam **k=0.06** e mostram **1.405,87 tCO₂eq** para vermicompostagem.
+                é comparável aos resultados do Script 2 que usam **k=0,06** e mostram **1.405,87 tCO₂eq** para vermicompostagem.
                 
                 **Seu resultado (k={formatar_br(st.session_state.k_continuo)}):** {formatar_br(total_evitado_vermi)} tCO₂eq
-                **Resultado Script 2 (k=0.06):** 1.405,87 tCO₂eq
-                **Diferença:** {formatar_br(total_evitado_vermi - 1405.87)} tCO₂eq ({((total_evitado_vermi - 1405.87)/1405.87*100):+.1f}%)
+                **Resultado Script 2 (k=0,06):** 1.405,87 tCO₂eq
+                **Diferença:** {formatar_br(total_evitado_vermi - 1405.87)} tCO₂eq ({formatar_br((total_evitado_vermi - 1405.87)/1405.87*100)}%)
                 
                 *Nota: Diferenças são esperadas devido ao k ajustado e variações nos parâmetros ambientais.*
                 """)
@@ -1146,12 +1167,12 @@ with tab2:
                 st.info(f"""
                 **📊 Para comparação com o Script 2 (Tabela 18):**
                 
-                O Script 2 mostra **1.405,87 tCO₂eq** para 100 kg/dia × 20 anos com vermicompostagem e **k=0.06**.
+                O Script 2 mostra **1.405,87 tCO₂eq** para 100 kg/dia × 20 anos com vermicompostagem e **k=0,06**.
                 
                 **Sua simulação atual (k={formatar_br(st.session_state.k_continuo)}):** {formatar_br(total_evitado_vermi)} tCO₂eq
                 **Escala:** {residuos_kg_dia} kg/dia × {anos_simulacao_cont} anos
                 
-                *Para comparar diretamente, configure: 100 kg/dia × 20 anos com k=0.06*
+                *Para comparar diretamente, configure: 100 kg/dia × 20 anos com k=0,06*
                 """)
 
 # =============================================================================
